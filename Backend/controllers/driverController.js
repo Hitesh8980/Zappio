@@ -23,15 +23,18 @@ const registerDriver = async (req, res) => {
 
 const verifyDriver = async (req, res) => {
   try {
-    const { driverId, mobileNumber, otp } = req.body;
-    if (!driverId || !mobileNumber || !otp) {
-      return res.status(400).json({ message: 'Driver ID, mobile number, and OTP are required' });
+    const { driverId, idToken } = req.body;
+    if (!driverId || !idToken) {
+      return res.status(400).json({ message: 'Driver ID and ID token are required' });
     }
-    const isValid = await verifyOTP(mobileNumber, otp);
-    if (isValid) {
-      const updatedDriver = await updateDriverVerification(driverId, true);
-      res.status(200).json({ message: 'Driver verified successfully', driver: updatedDriver });
+    const decodedToken = await verifyPhoneAuthToken(idToken);
+    const driver = await findDriverByMobile(decodedToken.phone_number);
+    if (!driver || driver.id !== driverId) {
+      return res.status(400).json({ message: 'Driver not found or mismatch' });
     }
+    const updatedDriver = await updateDriverVerification(driverId, true);
+    const customToken = await auth.createCustomToken(decodedToken.uid);
+    res.status(200).json({ message: 'Driver verified successfully', driver: updatedDriver, token: customToken });
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
