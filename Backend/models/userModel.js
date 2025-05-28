@@ -9,9 +9,9 @@ const createUser = async (userData) => {
     const user = {
       name: userData.name,
       mobileNumber: userData.mobileNumber,
-      role: userData.role || 'user', // Default role is 'user'
+      role: userData.role || 'user', 
       createdAt: new Date(),
-      verified: false // Initially unverified until OTP is confirmed
+      verified: false 
     };
 
     const userRef = db.collection(USER_COLLECTION).doc();

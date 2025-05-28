@@ -1,5 +1,9 @@
-const rateLimitStore = {}; // In-memory store: { mobileNumber: timestamp }
+const rateLimit = require('express-rate-limit');
 
+// In-memory store for OTP rate limiting
+const rateLimitStore = {}; // { mobileNumber: timestamp }
+
+// Custom middleware for OTP rate limiting
 const otpRateLimit = (req, res, next) => {
   const { mobileNumber } = req.body;
   if (!mobileNumber) {
@@ -18,4 +22,15 @@ const otpRateLimit = (req, res, next) => {
   next();
 };
 
-module.exports = { otpRateLimit };
+// IP-based rate limiting using express-rate-limit
+const ipRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // 100 requests per IP
+  message: 'Too many requests, please try again later.'
+});
+
+// Export both middlewares
+module.exports = {
+  ipRateLimit, // For general IP-based rate limiting
+  otpRateLimit // For OTP-specific rate limiting
+};

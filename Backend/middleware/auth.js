@@ -1,4 +1,4 @@
-const { auth } = require('../config/firebase');
+const { auth, db } = require('../config/firebase');
 
 const verifyToken = async (req, res, next) => {
   try {
@@ -37,7 +37,7 @@ const verifyToken = async (req, res, next) => {
       return res.status(403).json({ message: 'Account not verified' });
     }
 
-    req.entity = { uid, ...entity }; // Attach user/driver info to request
+    req.entity = { uid, ...entity }; 
     next();
   } catch (error) {
     res.status(401).json({ message: 'Invalid or expired token', error: error.message });
