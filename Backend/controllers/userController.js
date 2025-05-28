@@ -24,22 +24,42 @@ const registerUser = async (req, res) => {
 
 const verifyUser = async (req, res) => {
   try {
-    const { userId, idToken } = req.body;
-    if (!userId || !idToken) {
-      return res.status(400).json({ message: 'User ID and ID token are required' });
+    const { idToken } = req.body;
+    if (!idToken) {
+      return res.status(400).json({ message: 'ID token is required' });
     }
+
+    // 1. Verify Firebase ID token
     const decodedToken = await verifyPhoneAuthToken(idToken);
-    const user = await findUserByMobile(decodedToken.phone_number);
-    if (!user || user.id !== userId) {
-      return res.status(400).json({ message: 'User not found or mismatch' });
+    const phoneNumber = decodedToken.phone_number;
+
+    if (!phoneNumber) {
+      return res.status(400).json({ message: 'Phone number not found in token' });
     }
-    const updatedUser = await updateUserVerification(userId, true);
+
+    // 2. Find user in Firestore by phone number
+    const user = await findUserByMobile(phoneNumber);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found for this phone number' });
+    }
+
+    // 3. Update user as verified
+    const updatedUser = await updateUserVerification(user.id, true);
+
+    // 4. Create a custom token using Firebase UID
     const customToken = await auth.createCustomToken(decodedToken.uid);
-    res.status(200).json({ message: 'User verified successfully', user: updatedUser, token: customToken });
+
+    // 5. Respond
+    res.status(200).json({
+      message: 'User verified successfully',
+      user: updatedUser,
+      token: customToken
+    });
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
 };
+
 
 const resendOTP = async (req, res) => {
   try {
