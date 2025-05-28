@@ -1,5 +1,5 @@
 const { Client } = require('@googlemaps/google-maps-services-js');
-const LocationCache = require('../models/LocationCache');
+const LocationCache = require('../models/locationCache');
 const client = new Client({});
 
 const geocodeAddress = async (address) => {

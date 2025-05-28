@@ -41,3 +41,4 @@
 ::ffff:127.0.0.1 - - [28/May/2025:16:19:47 +0000] "POST /api/users/register HTTP/1.1" 200 79 "-" "Thunder Client (https://www.thunderclient.com)"
 ::ffff:127.0.0.1 - - [28/May/2025:16:20:15 +0000] "POST /api/users/verify HTTP/1.1" 429 56 "-" "Thunder Client (https://www.thunderclient.com)"
 ::ffff:127.0.0.1 - - [28/May/2025:16:20:22 +0000] "POST /api/users/verify HTTP/1.1" 200 1048 "-" "Thunder Client (https://www.thunderclient.com)"
+::ffff:127.0.0.1 - - [28/May/2025:16:34:14 +0000] "POST /api/users/verify HTTP/1.1" 200 1048 "-" "Thunder Client (https://www.thunderclient.com)"
