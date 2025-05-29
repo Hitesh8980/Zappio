@@ -27,5 +27,18 @@ module.exports = {
       perKm: parseFloat(process.env.FARE_CAR_PER_KM) || 15,
       perMin: parseFloat(process.env.FARE_CAR_PER_MIN) || 2
     }
+  },
+  peakHours: {
+    morning: { start: '07:00', end: '09:00', multiplier: 1.5 },
+    evening: { start: '17:00', end: '20:00', multiplier: 1.5 }
+  },
+  weather: {
+    apiKey: process.env.WEATHER_API_KEY,
+    badConditions: {
+      rain: { multiplier: 1.2 },
+      snow: { multiplier: 1.3 },
+      storm: { multiplier: 1.5 }
+    }
   }
+
 };

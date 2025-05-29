@@ -1,21 +1,28 @@
+// middleware/auth.js
 const { auth, db } = require('../config/firebase');
 
 const verifyToken = async (req, res, next) => {
+  console.log('🔐 verifyToken middleware called for:', req.originalUrl);
+
   try {
     const token = req.headers.authorization?.split('Bearer ')[1];
     if (!token) {
+      console.warn('⚠️ No token provided');
       return res.status(401).json({ message: 'No token provided' });
     }
 
     const decodedToken = await auth.verifyIdToken(token);
     const uid = decodedToken.uid;
 
-    // Check if user or driver exists and is verified
+    // Check Firestore for user or driver by phone number
+    const phone = decodedToken.phone_number;
+
     const userSnapshot = await db.collection('users')
-      .where('mobileNumber', '==', decodedToken.phone_number)
+      .where('mobileNumber', '==', phone)
       .get();
+
     const driverSnapshot = await db.collection('drivers')
-      .where('mobileNumber', '==', decodedToken.phone_number)
+      .where('mobileNumber', '==', phone)
       .get();
 
     if (userSnapshot.empty && driverSnapshot.empty) {
@@ -37,9 +44,10 @@ const verifyToken = async (req, res, next) => {
       return res.status(403).json({ message: 'Account not verified' });
     }
 
-    req.entity = { uid, ...entity }; 
+    req.entity = { uid, ...entity };
     next();
   } catch (error) {
+    console.error('❌ verifyToken error:', error.message);
     res.status(401).json({ message: 'Invalid or expired token', error: error.message });
   }
 };
