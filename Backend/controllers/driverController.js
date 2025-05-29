@@ -39,6 +39,22 @@ const verifyDriver = async (req, res) => {
     res.status(400).json({ message: error.message });
   }
 };
+const verifyDriverOTP = async (req, res) => {
+  try {
+    const { driverId, mobileNumber, otp } = req.body;
+    if (!driverId || !mobileNumber || !otp) {
+      return res.status(400).json({ message: 'Driver ID, mobile number and OTP are required' });
+    }
+    const isValidOtp = await verifyOTP(mobileNumber, otp);
+    if (!isValidOtp) {
+      return res.status(400).json({ message: 'Invalid OTP' });
+    }
+    const updatedDriver = await updateDriverVerification(driverId, true);
+    res.status(200).json({ message: 'Driver verified successfully', driver: updatedDriver });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 
 const resendOTP = async (req, res) => {
   try {
@@ -77,5 +93,5 @@ module.exports = {
   registerDriver,
   verifyDriver,
   resendOTP,
-  loginDriver
+  loginDriver,verifyDriverOTP
 };

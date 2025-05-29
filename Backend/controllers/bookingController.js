@@ -5,20 +5,25 @@ const notificationService = require('../services/notificationServices');
 const createBooking = async (req, res) => {
   try {
     const { rideId, driverId } = req.body;
-    const userId = req.user.uid; // From auth middleware
-    
-    const ride = await Ride.get(rideId);
-    if (!ride || ride.userId !== userId) {
-      return res.status(404).json({ error: 'Ride not found or unauthorized' });
+
+    const ride = await Ride.get(rideId); 
+    if (!ride) {
+      return res.status(404).json({ error: 'Ride not found' });
     }
-    
-    // Check driver existence (basic validation)
+
+    const userId = req.entity?.uid || ride.userId || 'testUser1';
+
+    if (ride.userId !== userId) {
+      return res.status(403).json({ error: 'Unauthorized access to ride' });
+    }
+
+    // Check driver existence
     const driverSnap = await require('firebase-admin').firestore()
       .collection('drivers').doc(driverId).get();
     if (!driverSnap.exists) {
       return res.status(400).json({ error: 'Driver not found' });
     }
-    
+
     // Create booking
     const bookingData = {
       rideId,
@@ -28,14 +33,15 @@ const createBooking = async (req, res) => {
       createdAt: new Date().toISOString()
     };
     const booking = await Booking.create(bookingData);
-    
+
     // Update ride status
     await Ride.update(rideId, { status: 'assigned', driverId });
-    
+
     // Notify driver
     await notificationService.notifyDriver(driverId, booking.id, ride);
-    
+
     res.status(201).json({ bookingId: booking.id, ...bookingData });
+
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

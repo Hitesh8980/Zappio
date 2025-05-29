@@ -3,46 +3,53 @@ const Booking = require('../models/bookingModel');
 const mapsService = require('../services/mapServices');
 const pricingService = require('../services/pricingServices');
 const routingService = require('../services/routingServices');
+const admin = require('firebase-admin');
+const geoService = require('../services/geoCodingServices');
+
+
 
 const createRide = async (req, res) => {
   try {
     const { pickupLocation, dropLocation, vehicleType } = req.body;
     const userId = req.entity?.uid || 'test-user-id';
 
-    // Validate required fields
     if (!pickupLocation || !dropLocation || !vehicleType) {
       throw new Error('Missing required fields');
     }
 
-    // Get route information
-    const route = await routingService.getRoute(pickupLocation, dropLocation);
-    
-    // Ensure we have valid route data
+    // Geocode both locations (whether they are strings or already coordinates)
+    const pickupCoords = typeof pickupLocation === 'string'
+      ? await geoService.geocodeAddress(pickupLocation)
+      : pickupLocation;
+
+    const dropCoords = typeof dropLocation === 'string'
+      ? await geoService.geocodeAddress(dropLocation)
+      : dropLocation;
+
+    // Use routing service with lat/lng coordinates
+    const route = await routingService.getRoute(pickupCoords, dropCoords);
     if (!route?.overview_polyline?.points) {
       throw new Error('Invalid route data received from routing service');
     }
 
-    // Prepare ride data with fallback values
     const rideData = {
       userId,
-      pickupLocation,
-      dropLocation,
+      pickupLocation: pickupCoords,
+      dropLocation: dropCoords,
       vehicleType,
       distance: route.distance || { value: 0, text: '0 km' },
       duration: route.duration || { value: 0, text: '0 mins' },
-      fare: 0, // Will be calculated below
+      fare: 0,
       route: route.overview_polyline.points,
       status: 'pending',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
 
-    // Calculate fare (distance in meters, convert to km)
     const distanceKm = rideData.distance.value / 1000;
     const durationMinutes = rideData.duration.value / 60;
     rideData.fare = await pricingService.calculateFare(vehicleType, distanceKm, durationMinutes);
 
-    // Create ride in Firestore with ignoreUndefinedProperties
     const rideRef = await admin.firestore()
       .collection('rides')
       .add(rideData, { ignoreUndefinedProperties: true });
@@ -68,7 +75,6 @@ const createRide = async (req, res) => {
     });
   }
 };
-
 
 const getRide = async (req, res) => {
   try {
