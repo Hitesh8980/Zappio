@@ -13,19 +13,33 @@ const getPricing = async (vehicleType) => {
 // Seed initial pricing if not exists
 const seedPricing = async () => {
   const defaultPricing = {
-    bike: { baseFare: 20, perKm: 10 },
-    car: { baseFare: 50, perKm: 15 },
-    auto: { baseFare: 30, perKm: 12 }
+    bike: { baseFare: 20, perKm: 10, perMin: 1 },
+    car: { baseFare: 50, perKm: 15, perMin: 2 },
+    auto: { baseFare: 30, perKm: 12, perMin: 1.5 }
   };
   for (const [vehicleType, data] of Object.entries(defaultPricing)) {
     const pricingRef = db.collection('pricing').doc(vehicleType);
     const doc = await pricingRef.get();
-    if (!doc.exists) {
+    const existingData = doc.exists ? doc.data() : {};
+    const isInvalid = !doc.exists ||
+      typeof existingData.baseFare !== 'number' ||
+      typeof existingData.perKm !== 'number' ||
+      typeof existingData.perMin !== 'number';
+    if (isInvalid) {
       await pricingRef.set(data);
+      console.log(`Seeded or fixed pricing for ${vehicleType}`);
+    } else {
+      console.log(`Pricing for ${vehicleType} already valid`);
     }
   }
 };
+if (process.env.NODE_ENV !== 'production') {
+  seedPricing().catch(console.error);
+}
 
-seedPricing();
+
+if (process.env.NODE_ENV !== 'production') {
+  seedPricing().catch(console.error);
+}
 
 module.exports = { getPricing };
