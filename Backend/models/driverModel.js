@@ -7,12 +7,30 @@ const createDriver = async (driverData) => {
     const driver = {
       name: driverData.name,
       mobileNumber: driverData.mobileNumber,
-      role: driverData.role || 'driver',
+      role: 'driver',
+      verified: false,
+      createdAt: new Date(),
+
+      // Optional details
       licenseNumber: driverData.licenseNumber || null,
       vehicle: driverData.vehicle || { type: null, registration: null },
-      createdAt: new Date(),
-      verified: false
+      
+      documents: {
+        aadhaarFrontUrl: null,
+        aadhaarBackUrl: null,
+        licenseFrontUrl: null,
+        licenseBackUrl: null,
+        panCardUrl: null
+      },
+
+      bankDetails: {
+        accountHolderName: null,
+        accountNumber: null,
+        ifscCode: null,
+        bankName: null
+      }
     };
+
     const driverRef = db.collection(DRIVER_COLLECTION).doc();
     await driverRef.set(driver);
     return { id: driverRef.id, ...driver };
@@ -20,6 +38,7 @@ const createDriver = async (driverData) => {
     throw new Error(`Failed to create driver: ${error.message}`);
   }
 };
+
 
 const findDriverByMobile = async (mobileNumber) => {
   try {
@@ -48,9 +67,24 @@ const updateDriverVerification = async (driverId, verified) => {
     throw new Error(`Failed to update verification: ${error.message}`);
   }
 };
+const updateDriverProfile = async (req, res) => {
+  try {
+    const { driverId } = req.params;
+    const updates = req.body;
+
+    const driverRef = db.collection('drivers').doc(driverId);
+    await driverRef.update(updates);
+
+    const updated = await driverRef.get();
+    res.status(200).json({ message: 'Driver profile updated', driver: { id: updated.id, ...updated.data() } });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
 
 module.exports = {
   createDriver,
   findDriverByMobile,
-  updateDriverVerification
+  updateDriverVerification,
+  updateDriverProfile
 };

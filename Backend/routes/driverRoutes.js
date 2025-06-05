@@ -1,13 +1,23 @@
 const express = require('express');
 const router = express.Router();
+
+const {
+  registerDriver,
+  verifyDriver,
+  verifyDriverOTP,
+  resendOTP,
+  loginDriver,
+  updateDriverDetails
+} = require('../controllers/driverController');
+
 const { otpRateLimit } = require('../middleware/rateLimit');
-const { registerDriver, verifyDriver, resendOTP, loginDriver ,verifyDriverOTP} = require('../controllers/driverController');
 
+// Routes
 router.post('/register', registerDriver);
-router.post('/verify', verifyDriver);
-router.post('/resend-otp',otpRateLimit, resendOTP);
-router.post('/login', loginDriver);
-router.post('/verify-otp', verifyDriverOTP);
-
+router.post('/verify', verifyDriver);                    // alternate: direct verify using mobileNumber
+router.post('/verify-otp', verifyDriverOTP);             // verify using OTP
+router.post('/resend-otp', otpRateLimit, resendOTP);     // resend OTP with rate limit
+router.post('/login', loginDriver);                      // login flow (OTP-based)
+router.put('/:driverId/update-profile', updateDriverDetails); // update Aadhaar, PAN, vehicle, etc.
 
 module.exports = router;

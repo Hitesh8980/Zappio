@@ -3,23 +3,29 @@ const { sendOTP, verifyOTP } = require('../services/otpServices');
 
 const registerDriver = async (req, res) => {
   try {
-    const { name, mobileNumber, licenseNumber, vehicle } = req.body;
+    const { name, mobileNumber } = req.body;
     if (!name || !mobileNumber) {
       return res.status(400).json({ message: 'Name and mobile number are required' });
     }
+
     let driver = await findDriverByMobile(mobileNumber);
+
     if (driver && driver.verified) {
       return res.status(400).json({ message: 'Driver already registered and verified' });
     }
+
     if (!driver) {
-      driver = await createDriver({ name, mobileNumber, licenseNumber, vehicle });
+      driver = await createDriver({ name, mobileNumber });
     }
+
     const otpResponse = await sendOTP(mobileNumber);
-    res.status(200).json({ message: 'Driver created, OTP sent', driverId: driver.id, ...otpResponse });
+    res.status(200).json({ message: 'OTP sent to driver', driverId: driver.id, ...otpResponse });
+
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 const verifyDriver = async (req, res) => {
   try {
@@ -88,10 +94,28 @@ const loginDriver = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+const updateDriverDetails = async (req, res) => {
+  try {
+    const { driverId } = req.params;
+    const updates = req.body;
+
+    const updatedDriver = await updateDriverProfile(driverId, updates);
+
+    res.status(200).json({
+      message: 'Driver profile updated successfully',
+      driver: updatedDriver
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
 
 module.exports = {
   registerDriver,
   verifyDriver,
   resendOTP,
-  loginDriver,verifyDriverOTP
+  loginDriver,verifyDriverOTP,updateDriverDetails
+  
 };

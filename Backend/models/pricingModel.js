@@ -13,7 +13,7 @@ const getPricing = async (vehicleType) => {
 // Seed initial pricing if not exists
 const seedPricing = async () => {
   const defaultPricing = {
-    bike: { baseFare: 20, perKm: 10, perMin: 1 },
+    bike: { baseFare: 20, perKm: 8, perMin: 1 },
     car: { baseFare: 50, perKm: 15, perMin: 2 },
     auto: { baseFare: 30, perKm: 12, perMin: 1.5 }
   };

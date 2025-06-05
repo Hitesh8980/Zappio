@@ -59,7 +59,7 @@ const getWeatherMultiplier = async (pickupLocation, req) => {
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lng}&current_weather=true`;
     const response = await axios.get(url);
 
-    const weatherCode = response.data.current_weather.weathercode; // fixed typo
+    const weatherCode = response.data.current_weather.weathercode; 
     const badWeatherCodes = ['61', '63', '65', '71', '73', '75', '80', '81', '82'];
     const isBadWeather = badWeatherCodes.includes(weatherCode.toString());
 
