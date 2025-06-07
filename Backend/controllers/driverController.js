@@ -1,65 +1,87 @@
-const { createDriver, findDriverByMobile, updateDriverVerification } = require('../models/driverModel');
+const { createDriver, findDriverByMobile, updateDriverVerification, updateDriverProfile, updateDriverStatus, updateDriverLocation } = require('../models/driverModel');
 const { sendOTP, verifyOTP } = require('../services/otpServices');
-const {updateDriverLocation}=require('../services/driverLocationService')
+const { GeoFirestore } = require('geofirestore');
+const { db } = require('../config/firebase');
+const admin = require('firebase-admin');
+const geofirestore = new GeoFirestore(db);
 
 const registerDriver = async (req, res) => {
   try {
-    const { name, mobileNumber } = req.body;
+    const { name, mobileNumber, fcmToken } = req.body;
     if (!name || !mobileNumber) {
-      return res.status(400).json({ message: 'Name and mobile number are required' });
+      return res.status(400).json({ success: false, error: 'Name and mobile number are required' });
+    }
+    if (fcmToken && typeof fcmToken !== 'string') {
+      return res.status(400).json({ success: false, error: 'Invalid fcmToken' });
     }
 
     let driver = await findDriverByMobile(mobileNumber);
-
     if (driver && driver.verified) {
-      return res.status(400).json({ message: 'Driver already registered and verified' });
+      return res.status(400).json({ success: false, error: 'Driver already registered and verified' });
     }
 
     if (!driver) {
-      driver = await createDriver({ name, mobileNumber });
+      driver = await createDriver({ name, mobileNumber, fcmToken });
     }
 
     const otpResponse = await sendOTP(mobileNumber);
-    res.status(200).json({ message: 'OTP sent to driver', driverId: driver.id, ...otpResponse });
-
+    res.json({ success: true, driverId: driver.id, ...otpResponse });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Error registering driver:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };
-
 
 const verifyDriver = async (req, res) => {
   try {
     const { driverId, idToken } = req.body;
     if (!driverId || !idToken) {
-      return res.status(400).json({ message: 'Driver ID and ID token are required' });
+      return res.status(400).json({ success: false, error: 'Driver ID and ID token are required' });
     }
-    const decodedToken = await verifyPhoneAuthToken(idToken);
+
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
     const driver = await findDriverByMobile(decodedToken.phone_number);
     if (!driver || driver.id !== driverId) {
-      return res.status(400).json({ message: 'Driver not found or mismatch' });
+      return res.status(400).json({ success: false, error: 'Driver not found or mismatch' });
     }
+    if (driver.verified) {
+      return res.status(400).json({ success: false, error: 'Driver already verified' });
+    }
+
     const updatedDriver = await updateDriverVerification(driverId, true);
-    const customToken = await auth.createCustomToken(decodedToken.uid);
-    res.status(200).json({ message: 'Driver verified successfully', driver: updatedDriver, token: customToken });
+    const customToken = await admin.auth().createCustomToken(decodedToken.uid);
+    res.json({ success: true, driver: updatedDriver, token: customToken });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.error('Error verifying driver:', error);
+    res.status(400).json({ success: false, error: error.message });
   }
 };
+
 const verifyDriverOTP = async (req, res) => {
   try {
     const { driverId, mobileNumber, otp } = req.body;
     if (!driverId || !mobileNumber || !otp) {
-      return res.status(400).json({ message: 'Driver ID, mobile number and OTP are required' });
+      return res.status(400).json({ success: false, error: 'Driver ID, mobile number, and OTP are required' });
     }
+
     const isValidOtp = await verifyOTP(mobileNumber, otp);
     if (!isValidOtp) {
-      return res.status(400).json({ message: 'Invalid OTP' });
+      return res.status(400).json({ success: false, error: 'Invalid OTP' });
     }
+
+    const driver = await findDriverByMobile(mobileNumber);
+    if (!driver || driver.id !== driverId) {
+      return res.status(400).json({ success: false, error: 'Driver not found or mismatch' });
+    }
+    if (driver.verified) {
+      return res.status(400).json({ success: false, error: 'Driver already verified' });
+    }
+
     const updatedDriver = await updateDriverVerification(driverId, true);
-    res.status(200).json({ message: 'Driver verified successfully', driver: updatedDriver });
+    res.json({ success: true, driver: updatedDriver });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Error verifying OTP:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
@@ -67,12 +89,19 @@ const resendOTP = async (req, res) => {
   try {
     const { mobileNumber } = req.body;
     if (!mobileNumber) {
-      return res.status(400).json({ message: 'Mobile number is required' });
+      return res.status(400).json({ success: false, error: 'Mobile number is required' });
     }
+
+    const driver = await findDriverByMobile(mobileNumber);
+    if (!driver) {
+      return res.status(404).json({ success: false, error: 'Driver not found' });
+    }
+
     const otpResponse = await sendOTP(mobileNumber);
-    res.status(200).json(otpResponse);
+    res.json({ success: true, ...otpResponse });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.error('Error resending OTP:', error);
+    res.status(400).json({ success: false, error: error.message });
   }
 };
 
@@ -80,74 +109,134 @@ const loginDriver = async (req, res) => {
   try {
     const { mobileNumber } = req.body;
     if (!mobileNumber) {
-      return res.status(400).json({ message: 'Mobile number is required' });
+      return res.status(400).json({ success: false, error: 'Mobile number is required' });
     }
+
     const driver = await findDriverByMobile(mobileNumber);
     if (!driver) {
-      return res.status(404).json({ message: 'Driver not found' });
+      return res.status(404).json({ success: false, error: 'Driver not found' });
     }
     if (!driver.verified) {
-      return res.status(400).json({ message: 'Driver not verified, please verify with OTP' });
+      return res.status(400).json({ success: false, error: 'Driver not verified, please verify with OTP' });
     }
+
     const otpResponse = await sendOTP(mobileNumber);
-    res.status(200).json({ message: 'OTP sent for login', driverId: driver.id, ...otpResponse });
+    res.json({ success: true, driverId: driver.id, ...otpResponse });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Error logging in driver:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };
-const updateDriverDetails = async (req, res) => {
+
+const updateProfile = async (req, res) => {
   try {
     const { driverId } = req.params;
     const updates = req.body;
+    if (!req.user || req.user.uid !== driverId) {
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+    if (updates.fcmToken && typeof updates.fcmToken !== 'string') {
+      return res.status(400).json({ success: false, error: 'Invalid fcmToken' });
+    }
 
     const updatedDriver = await updateDriverProfile(driverId, updates);
-
-    res.status(200).json({
-      message: 'Driver profile updated successfully',
-      driver: updatedDriver
-    });
+    res.json({ success: true, driver: updatedDriver });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Error updating driver profile:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };
+
 const updateLocation = async (req, res) => {
   try {
     const { driverId } = req.params;
-    const { location } = req.body; // Can be {lat, lng} or address string
-    
-    if (!location) {
-      return res.status(400).json({ error: 'Location is required' });
+    const { location, fcmToken, preferences } = req.body;
+    // if (!req.user || req.user.uid !== driverId) {
+    //   return res.status(403).json({ success: false, error: 'Unauthorized' });
+    // }
+    if (!location || typeof location.lat !== 'number' || typeof location.lng !== 'number') {
+      return res.status(400).json({ success: false, error: 'Valid location (lat, lng) is required' });
+    }
+    if (fcmToken && typeof fcmToken !== 'string') {
+      return res.status(400).json({ success: false, error: 'Invalid fcmToken' });
     }
 
-    const result = await updateDriverLocation(driverId, location);
-    res.json(result);
+    const driver = await updateDriverLocation(driverId, location, fcmToken, preferences);
+    res.json({ success: true, driver });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error updating driver location:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// GET /api/drivers/nearby?lat=...&lng=...&radius=...
+const updateStatus = async (req, res) => {
+  try {
+    const { driverId } = req.params;
+    const { status } = req.body;
+    if (!req.user || req.user.uid !== driverId) {
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+    if (!['available', 'on_ride', 'offline'].includes(status)) {
+      return res.status(400).json({ success: false, error: 'Invalid status' });
+    }
+
+    const driver = await updateDriverStatus(driverId, status);
+    res.json({ success: true, driver });
+  } catch (error) {
+    console.error('Error updating driver status:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 const getNearbyDrivers = async (req, res) => {
   try {
-    const { lat, lng, radius = 3, vehicleType } = req.query;
+    const { lat, lng, radius = 5, vehicleType } = req.query;
     const center = { lat: parseFloat(lat), lng: parseFloat(lng) };
-    
-    if (!lat || !lng) {
-      return res.status(400).json({ error: 'Latitude and longitude are required' });
+    if (!center.lat || !center.lng) {
+      return res.status(400).json({ success: false, error: 'Valid latitude and longitude are required' });
+    }
+    if (vehicleType && !['bike', 'auto', 'car'].includes(vehicleType)) {
+      return res.status(400).json({ success: false, error: 'Invalid vehicle type' });
     }
 
-    const drivers = await findNearbyDrivers(center, parseFloat(radius), vehicleType);
-    res.json(drivers);
+    const driversCollection = geofirestore.collection('drivers');
+    let query = driversCollection.near({
+      center: new admin.firestore.GeoPoint(center.lat, center.lng),
+      radius: parseFloat(radius),
+    }).where('isActive', '==', true);
+
+    if (vehicleType) {
+      query = query.where('vehicle.type', '==', vehicleType);
+    }
+
+    const snapshot = await query.get();
+    const drivers = snapshot.docs
+      .map(doc => {
+        const data = doc.data();
+        const distance = doc.distance;
+        if (data.status === 'available' || data.status === 'on_ride') {
+          return { id: doc.id, ...data, distance };
+        }
+        return null;
+      })
+      .filter(driver => driver)
+      .sort((a, b) => (a.status === 'available' ? 0 : 1) - (b.status === 'available' ? 0 : 1));
+
+    res.json({ success: true, drivers });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error getting nearby drivers:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };
-
 
 module.exports = {
   registerDriver,
   verifyDriver,
+  verifyDriverOTP,
   resendOTP,
-  loginDriver,verifyDriverOTP,updateDriverDetails,getNearbyDrivers,updateLocation
-  
+  loginDriver,
+  updateProfile,
+  updateLocation,
+  updateStatus,
+  getNearbyDrivers,
 };

@@ -1,4 +1,6 @@
+const admin = require('firebase-admin');
 const { db } = require('../config/firebase');
+const geofire = require('geofire-common');
 
 const DRIVER_COLLECTION = 'drivers';
 
@@ -9,36 +11,38 @@ const createDriver = async (driverData) => {
       mobileNumber: driverData.mobileNumber,
       role: 'driver',
       verified: false,
-      createdAt: new Date(),
-
-      // Optional details
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
       licenseNumber: driverData.licenseNumber || null,
       vehicle: driverData.vehicle || { type: null, registration: null },
-      
       documents: {
         aadhaarFrontUrl: null,
         aadhaarBackUrl: null,
         licenseFrontUrl: null,
         licenseBackUrl: null,
-        panCardUrl: null
+        panCardUrl: null,
       },
-
       bankDetails: {
         accountHolderName: null,
         accountNumber: null,
         ifscCode: null,
-        bankName: null
-      }
+        bankName: null,
+      },
+      currentLocation: null, // GeoPoint, set via updateDriverLocation
+      isActive: false,
+      status: 'offline', // available, on_ride, offline
+      currentRideId: null,
+      preferences: driverData.preferences || { minRiderRating: 0, maxDistance: 20 },
+      fcmToken: driverData.fcmToken || null,
+      lastLocationUpdate: null,
     };
 
-    const driverRef = db.collection(DRIVER_COLLECTION).doc();
+    const driverRef = db.collection(DRIVER_COLLECTION).doc(driverData.driverId || undefined);
     await driverRef.set(driver);
     return { id: driverRef.id, ...driver };
   } catch (error) {
     throw new Error(`Failed to create driver: ${error.message}`);
   }
 };
-
 
 const findDriverByMobile = async (mobileNumber) => {
   try {
@@ -67,20 +71,31 @@ const updateDriverVerification = async (driverId, verified) => {
     throw new Error(`Failed to update verification: ${error.message}`);
   }
 };
-const updateDriverProfile = async (req, res) => {
+
+const updateDriverProfile = async (driverId, updates) => {
   try {
-    const { driverId } = req.params;
-    const updates = req.body;
+    const driverRef = db.collection(DRIVER_COLLECTION).doc(driverId);
+    const allowedUpdates = [
+      'name', 'licenseNumber', 'vehicle', 'documents', 'bankDetails',
+      'preferences', 'fcmToken', // Allow fcmToken updates
+    ];
+    const filteredUpdates = Object.keys(updates)
+      .filter(key => allowedUpdates.includes(key))
+      .reduce((obj, key) => ({ ...obj, [key]: updates[key] }), {});
+    
+    if (Object.keys(filteredUpdates).length === 0) {
+      throw new Error('No valid fields to update');
+    }
 
-    const driverRef = db.collection('drivers').doc(driverId);
-    await driverRef.update(updates);
-
+    await driverRef.update(filteredUpdates);
     const updated = await driverRef.get();
-    res.status(200).json({ message: 'Driver profile updated', driver: { id: updated.id, ...updated.data() } });
+    if (!updated.exists) throw new Error('Driver not found');
+    return { id: updated.id, ...updated.data() };
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    throw new Error(`Failed to update driver profile: ${error.message}`);
   }
 };
+
 const updateDriverStatus = async (driverId, status) => {
   try {
     const validStatuses = ['available', 'on_ride', 'offline'];
@@ -89,12 +104,45 @@ const updateDriverStatus = async (driverId, status) => {
     }
 
     const driverRef = db.collection(DRIVER_COLLECTION).doc(driverId);
-    await driverRef.update({ status });
-    
+    const updates = { 
+      status,
+      isActive: status !== 'offline',
+      lastLocationUpdate: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    if (status !== 'on_ride') updates.currentRideId = null;
+
+    await driverRef.update(updates);
     const updated = await driverRef.get();
+    if (!updated.exists) throw new Error('Driver not found');
     return { id: updated.id, ...updated.data() };
   } catch (error) {
     throw new Error(`Failed to update driver status: ${error.message}`);
+  }
+};
+
+const updateDriverLocation = async (driverId, location, fcmToken = null, preferences = null) => {
+  try {
+    if (!location || !location.lat || !location.lng) {
+      throw new Error('Valid latitude and longitude are required');
+    }
+
+    const driverRef = db.collection(DRIVER_COLLECTION).doc(driverId);
+    const geohash = geofire.geohashForLocation([location.lat, location.lng]);
+    const updates = {
+      currentLocation: new admin.firestore.GeoPoint(location.lat, location.lng),
+      geohash,
+      lastLocationUpdate: admin.firestore.FieldValue.serverTimestamp(),
+      isActive: true,
+    };
+    if (fcmToken) updates.fcmToken = fcmToken;
+    if (preferences) updates.preferences = preferences;
+
+    await driverRef.update(updates);
+    const updated = await driverRef.get();
+    if (!updated.exists) throw new Error('Driver not found');
+    return { id: updated.id, ...updated.data() };
+  } catch (error) {
+    throw new Error(`Failed to update driver location: ${error.message}`);
   }
 };
 
@@ -120,5 +168,8 @@ module.exports = {
   createDriver,
   findDriverByMobile,
   updateDriverVerification,
-  updateDriverProfile,getDriverLocation,updateDriverStatus
+  updateDriverProfile,
+  updateDriverStatus,
+  updateDriverLocation,
+  getDriverLocation,
 };

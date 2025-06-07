@@ -7,7 +7,7 @@ const userRoutes = require('./routes/userRoutes');
 const driverRoutes = require('./routes/driverRoutes');
 const bookingRoutes = require('./routes/bookingRoutes');
 const rideRoutes = require('./routes/rideRoutes'); 
-const locationRoutes = require('./routes/locationRoutes'); // New route for locations
+const locationRoutes = require('./routes/locationRoutes'); 
 
 const rateLimit = require('./middleware/rateLimit');
 const logger = require('./utils/logger');

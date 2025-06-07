@@ -1,196 +1,89 @@
-// const Ride = require('../models/rideModel');
-// const Booking = require('../models/bookingModel');
-// const mapsService = require('../services/mapServices');
-// const pricingService = require('../services/pricingServices');
-// const routingService = require('../services/routingServices');
-// const admin = require('firebase-admin');
-// const geoService = require('../services/geoCodingServices');
-
-
-
-// // controllers/rideController.js
-// const createRide = async (req, res) => {
-//   try {
-//     const { pickupLocation, dropLocation, vehicleType } = req.body;
-//     const userId = req.entity?.uid || 'test-user-id';
-//     if (!pickupLocation || !dropLocation || !vehicleType) {
-//       throw new Error('Missing required fields');
-//     }
-// // Geocode both locations (whether they are strings or already coordinates)
-//     const pickupCoords = typeof pickupLocation === 'string'
-//       ? await geoService.geocodeAddress(pickupLocation)
-//       : pickupLocation;
-//     const dropCoords = typeof dropLocation === 'string'
-//       ? await geoService.geocodeAddress(dropLocation)
-//       : dropLocation;
-// // Use routing service with lat/lng coordinates
-//     const route = await routingService.getRoute(pickupCoords, dropCoords);
-//     if (!route?.overview_polyline?.points) {
-//       throw new Error('Invalid route data received from routing service');
-//     }
-
-//     const rideData = {
-//       userId,
-//       pickupLocation: pickupCoords,
-//       dropLocation: dropCoords,
-//       vehicleType,
-//       distance: route.distance || { value: 0, text: '0 km' },
-//       duration: route.duration || { value: 0, text: '0 mins' },
-//       fare: 0,
-//       route: route.overview_polyline.points,
-//       status: 'pending',
-//       createdAt: new Date().toISOString(),
-//       updatedAt: new Date().toISOString()
-//     };
-
-//     const distanceKm = rideData.distance.value;
-//     const durationMinutes = rideData.duration.value / 60;
-//     const fare = await pricingService.calculateFare(vehicleType, distanceKm, durationMinutes, pickupLocation);
-//     rideData.fare = fare.total;
-
-//     const rideRef = await admin.firestore()
-//       .collection('rides')
-//       .add(rideData, { ignoreUndefinedProperties: true });
-
-//     const ride = { id: rideRef.id, ...rideData };
-
-//     res.status(201).json({
-//       success: true,
-//       ride: {
-//         ...ride,
-//         distance: ride.distance.text,
-//         duration: ride.duration.text,
-//         fare: fare.total,
-//         fareBreakdown: fare.breakdown
-//       }
-//     });
-//   } catch (error) {
-//     console.error('Error creating ride:', error);
-//     res.status(500).json({
-//       success: false,
-//       error: error.message,
-//       details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-//     });
-//   }
-// };
-// // ... rest of the file ...
-// const getRide = async (req, res) => {
-//   try {
-//     const ride = await Ride.get(req.params.rideId);
-//     if (!ride) return res.status(404).json({ error: 'Ride not found' });
-//     res.json(ride);
-//   } catch (error) {
-//     res.status(500).json({ error: error.message });
-//   }
-// };
-
-// module.exports = { createRide, getRide };
 const Ride = require('../models/rideModel');
-const Booking = require('../models/bookingModel');
-const mapsService = require('../services/mapServices');
-const pricingService = require('../services/pricingServices');
-const routingService = require('../services/routingServices');
+const { geocodeAddress } = require('../services/geoCodingServices');
+const { getRoute } = require('../services/routingServices');
+const { calculateFare } = require('../services/pricingServices');
 const admin = require('firebase-admin');
-const geoService = require('../services/geoCodingServices');
+const { db } = require('../config/firebase');
 
-const createRide = async (req, res) => {
+exports.createRide = async (req, res) => {
   try {
-    console.log('Starting createRide:', req.body);
     const { pickupLocation, dropLocation, vehicleType } = req.body;
     const userId = req.entity?.uid || 'test-user-id';
-
     if (!pickupLocation || !dropLocation || !vehicleType) {
       throw new Error('Missing required fields');
     }
 
-    console.log('Geocoding pickup location:', pickupLocation);
-    let pickupCoords;
-    try {
-      pickupCoords = typeof pickupLocation === 'string'
-        ? await geoService.geocodeAddress(pickupLocation)
-        : pickupLocation;
-    } catch (error) {
-      console.error('Pickup geocoding failed:', error.message);
-      throw new Error(`Pickup geocoding failed: ${error.message}`);
-    }
-    console.log('Pickup Coordinates:', pickupCoords);
+    const pickupCoords = typeof pickupLocation === 'string' ? await geocodeAddress(pickupLocation) : pickupLocation;
+    const dropCoords = typeof dropLocation === 'string' ? await geocodeAddress(dropLocation) : dropLocation;
 
-    console.log('Geocoding drop location:', dropLocation);
-    let dropCoords;
-    try {
-      dropCoords = typeof dropLocation === 'string'
-        ? await geoService.geocodeAddress(dropLocation)
-        : dropLocation;
-    } catch (error) {
-      console.error('Drop geocoding failed:', error.message);
-      throw new Error(`Drop geocoding failed: ${error.message}`);
-    }
-    console.log('Drop Coordinates:', dropCoords);
-
-    if (!pickupCoords?.lat || !pickupCoords?.lng || !dropCoords?.lat || !dropCoords?.lng) {
-      console.error('Invalid coordinates:', { pickupCoords, dropCoords });
+    if (!pickupCoords.lat || !pickupCoords.lng || !dropCoords.lat || !dropCoords.lng) {
       throw new Error('Invalid coordinates from geocoding');
     }
 
-    console.log('Fetching route...');
-    const route = await routingService.getRoute(pickupCoords, dropCoords);
-    console.log('Route:', route);
+    const route = await getRoute(pickupCoords, dropCoords);
     if (!route?.overview_polyline?.points) {
-      throw new Error('Invalid route data received from routing service');
+      throw new Error('Invalid route data from routing service');
     }
+
+    const distanceKm = route.distance.value / 1000;
+    const durationMinutes = route.duration.value / 60;
+    const fare = await calculateFare(vehicleType, route.distance.value, durationMinutes, pickupCoords, req);
+    console.log('Fare from pricingService:', fare); // Debug log
+
+    const user = (await db.collection('users').doc(userId).get()).data();
+    const riderRating = user?.rating || 4.0;
 
     const rideData = {
       userId,
-      pickupLocation: pickupCoords,
-      dropLocation: dropCoords,
+      pickupLocation: new admin.firestore.GeoPoint(pickupCoords.lat, pickupCoords.lng),
+      dropLocation: new admin.firestore.GeoPoint(dropCoords.lat, dropCoords.lng),
       vehicleType,
-      distance: route.distance || { value: 0, text: '0 km' },
-      duration: route.duration || { value: 0, text: '0 mins' },
-      fare: 0,
+      distance: route.distance,
+      duration: route.duration,
+      fare: fare.total,
       route: route.overview_polyline.points,
       status: 'pending',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      riderRating,
     };
 
-    console.log('Calculating fare...');
-    const distanceKm = rideData.distance.value;
-    const durationMinutes = rideData.duration.value / 60;
-    const fare = await pricingService.calculateFare(vehicleType, distanceKm, durationMinutes, pickupLocation, req);
-    rideData.fare = fare.total;
-
-    console.log('Saving ride to Firestore...');
-    const rideRef = await admin.firestore()
-      .collection('rides')
-      .add(rideData, { ignoreUndefinedProperties: true });
-
+    const rideRef = await db.collection('rides').add(rideData);
     const ride = { id: rideRef.id, ...rideData };
 
-    console.log('Ride created successfully:', ride);
+    const requestRef = await db.collection('rideRequests').add({
+      rideId: rideRef.id,
+      searchRadius: 5,
+      status: 'pending',
+      vehicleType,
+      expiresAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() + 5 * 60 * 1000)), // 5 minutes
+    });
+
+    console.log(`Created rideRequests/${requestRef.id} for rideId: ${rideRef.id}`);
+
     res.status(201).json({
       success: true,
       ride: {
         ...ride,
         distance: ride.distance.text,
-        duration: ride.duration.text,
+        duration: ride.distance.text,
         fare: fare.total,
-        fareBreakdown: fare.breakdown
-      }
+        fareBreakdown: fare.breakdown,
+      },
+      requestId: requestRef.id // Return requestId
     });
-
   } catch (error) {
     console.error('Error creating ride:', error);
     res.status(500).json({
       success: false,
       error: error.message,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
     });
   }
 };
 
-const getRide = async (req, res) => {
+exports.getRide = async (req, res) => {
   try {
-    console.log('Starting getRide:', req.params.rideId);
     const ride = await Ride.get(req.params.rideId);
     if (!ride) return res.status(404).json({ error: 'Ride not found' });
     res.json(ride);
@@ -199,5 +92,3 @@ const getRide = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
-
-module.exports = { createRide, getRide };

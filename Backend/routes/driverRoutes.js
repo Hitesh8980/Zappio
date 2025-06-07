@@ -7,7 +7,7 @@ const {
   verifyDriverOTP,
   resendOTP,
   loginDriver,
-  updateDriverDetails,updateLocation,getNearbyDrivers
+  updateProfile,updateLocation,getNearbyDrivers
 } = require('../controllers/driverController');
 
 const { otpRateLimit } = require('../middleware/rateLimit');
@@ -18,7 +18,7 @@ router.post('/verify', verifyDriver);                    // alternate: direct ve
 router.post('/verify-otp', verifyDriverOTP);             // verify using OTP
 router.post('/resend-otp', otpRateLimit, resendOTP);     // resend OTP with rate limit
 router.post('/login', loginDriver);                      // login flow (OTP-based)
-router.put('/:driverId/update-profile', updateDriverDetails); // update Aadhaar, PAN, vehicle, etc.
+router.put('/:driverId/update-profile', updateProfile); // update Aadhaar, PAN, vehicle, etc.
 router.post('/:driverId/location', updateLocation);
 router.get('/nearby', getNearbyDrivers);
 module.exports = router;
