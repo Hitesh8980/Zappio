@@ -12,8 +12,8 @@ const createDriver = async (driverData) => {
       role: 'driver',
       verified: false,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      licenseNumber: driverData.licenseNumber || null,
-      vehicle: driverData.vehicle || { type: null, registration: null },
+      licenseNumber: null,
+      vehicle: { type: null, registration: null },
       documents: {
         aadhaarFrontUrl: null,
         aadhaarBackUrl: null,
@@ -27,16 +27,16 @@ const createDriver = async (driverData) => {
         ifscCode: null,
         bankName: null,
       },
-      currentLocation: null, // GeoPoint, set via updateDriverLocation
+      currentLocation: null,
       isActive: false,
-      status: 'offline', // available, on_ride, offline
+      status: 'offline',
       currentRideId: null,
-      preferences: driverData.preferences || { minRiderRating: 0, maxDistance: 20 },
-      fcmToken: driverData.fcmToken || null,
+      preferences: { minRiderRating: 0, maxDistance: 20 },
+      fcmToken: null,
       lastLocationUpdate: null,
     };
 
-    const driverRef = db.collection(DRIVER_COLLECTION).doc(driverData.driverId || undefined);
+    const driverRef = db.collection(DRIVER_COLLECTION).doc();
     await driverRef.set(driver);
     return { id: driverRef.id, ...driver };
   } catch (error) {
@@ -44,6 +44,60 @@ const createDriver = async (driverData) => {
   }
 };
 
+const updateDriverProfile = async (driverId, updates) => {
+  try {
+    const driverRef = db.collection(DRIVER_COLLECTION).doc(driverId);
+    const allowedUpdates = [
+      'name', 'licenseNumber', 'vehicle', 'documents', 'bankDetails',
+      'preferences', 'fcmToken',
+    ];
+    const filteredUpdates = Object.keys(updates)
+      .filter(key => allowedUpdates.includes(key))
+      .reduce((obj, key) => {
+        if (key === 'documents') {
+          // Ensure partial document updates are merged correctly
+          const validDocumentFields = [
+            'aadhaarFrontUrl', 'aadhaarBackUrl', 'licenseFrontUrl',
+            'licenseBackUrl', 'panCardUrl',
+          ];
+          const documentUpdates = Object.keys(updates.documents)
+            .filter(docKey => validDocumentFields.includes(docKey))
+            .reduce((docObj, docKey) => ({
+              ...docObj,
+              [docKey]: updates.documents[docKey] || null,
+            }), {});
+          return { ...obj, documents: documentUpdates };
+        }
+        if (key === 'bankDetails') {
+          // Ensure partial bank details updates are merged correctly
+          const validBankFields = [
+            'accountHolderName', 'accountNumber', 'ifscCode', 'bankName',
+          ];
+          const bankUpdates = Object.keys(updates.bankDetails)
+            .filter(bankKey => validBankFields.includes(bankKey))
+            .reduce((bankObj, bankKey) => ({
+              ...bankObj,
+              [bankKey]: updates.bankDetails[bankKey] || null,
+            }), {});
+          return { ...obj, bankDetails: bankUpdates };
+        }
+        return { ...obj, [key]: updates[key] };
+      }, {});
+
+    if (Object.keys(filteredUpdates).length === 0) {
+      throw new Error('No valid fields to update');
+    }
+
+    await driverRef.update(filteredUpdates);
+    const updated = await driverRef.get();
+    if (!updated.exists) throw new Error('Driver not found');
+    return { id: updated.id, ...updated.data() };
+  } catch (error) {
+    throw new Error(`Failed to update driver profile: ${error.message}`);
+  }
+};
+
+// Other model functions (unchanged)
 const findDriverByMobile = async (mobileNumber) => {
   try {
     const snapshot = await db.collection(DRIVER_COLLECTION)
@@ -69,30 +123,6 @@ const updateDriverVerification = async (driverId, verified) => {
     return { id: updatedDoc.id, ...updatedDoc.data() };
   } catch (error) {
     throw new Error(`Failed to update verification: ${error.message}`);
-  }
-};
-
-const updateDriverProfile = async (driverId, updates) => {
-  try {
-    const driverRef = db.collection(DRIVER_COLLECTION).doc(driverId);
-    const allowedUpdates = [
-      'name', 'licenseNumber', 'vehicle', 'documents', 'bankDetails',
-      'preferences', 'fcmToken', // Allow fcmToken updates
-    ];
-    const filteredUpdates = Object.keys(updates)
-      .filter(key => allowedUpdates.includes(key))
-      .reduce((obj, key) => ({ ...obj, [key]: updates[key] }), {});
-    
-    if (Object.keys(filteredUpdates).length === 0) {
-      throw new Error('No valid fields to update');
-    }
-
-    await driverRef.update(filteredUpdates);
-    const updated = await driverRef.get();
-    if (!updated.exists) throw new Error('Driver not found');
-    return { id: updated.id, ...updated.data() };
-  } catch (error) {
-    throw new Error(`Failed to update driver profile: ${error.message}`);
   }
 };
 

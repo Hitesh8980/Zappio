@@ -1,18 +1,14 @@
-const { createDriver, findDriverByMobile, updateDriverVerification, updateDriverProfile, updateDriverStatus, updateDriverLocation } = require('../models/driverModel');
-const { sendOTP, verifyOTP } = require('../services/otpServices');
+const { createDriver, findDriverByMobile, updateDriverVerification, updateDriverProfile, updateDriverStatus, updateDriverLocation, getDriverLocation } = require('../models/driverModel');
+const admin = require('firebase-admin');
 const { GeoFirestore } = require('geofirestore');
 const { db } = require('../config/firebase');
-const admin = require('firebase-admin');
 const geofirestore = new GeoFirestore(db);
 
 const registerDriver = async (req, res) => {
   try {
-    const { name, mobileNumber, fcmToken } = req.body;
+    const { name, mobileNumber } = req.body;
     if (!name || !mobileNumber) {
       return res.status(400).json({ success: false, error: 'Name and mobile number are required' });
-    }
-    if (fcmToken && typeof fcmToken !== 'string') {
-      return res.status(400).json({ success: false, error: 'Invalid fcmToken' });
     }
 
     let driver = await findDriverByMobile(mobileNumber);
@@ -21,11 +17,11 @@ const registerDriver = async (req, res) => {
     }
 
     if (!driver) {
-      driver = await createDriver({ name, mobileNumber, fcmToken });
+      driver = await createDriver({ name, mobileNumber });
     }
 
-    const otpResponse = await sendOTP(mobileNumber);
-    res.json({ success: true, driverId: driver.id, ...otpResponse });
+    // Firebase Authentication will handle OTP verification; client should initiate OTP flow
+    res.json({ success: true, driverId: driver.id, message: 'Driver registered, please verify with OTP' });
   } catch (error) {
     console.error('Error registering driver:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -48,80 +44,80 @@ const verifyDriver = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Driver already verified' });
     }
 
-    const updatedDriver = await updateDriverVerification(driverId, true);
+    // Link Firebase Auth UID to Firestore document
+    await db.collection('drivers').doc(driverId).update({ 
+      verified: true,
+      firebaseUid: decodedToken.uid,
+    });
+
+    const updatedDriver = await db.collection('drivers').doc(driverId).get();
     const customToken = await admin.auth().createCustomToken(decodedToken.uid);
-    res.json({ success: true, driver: updatedDriver, token: customToken });
+    res.json({ 
+      success: true, 
+      driver: { id: updatedDriver.id, ...updatedDriver.data() }, 
+      token: customToken 
+    });
   } catch (error) {
     console.error('Error verifying driver:', error);
     res.status(400).json({ success: false, error: error.message });
   }
 };
 
-const verifyDriverOTP = async (req, res) => {
+const updateDriverDocuments = async (req, res) => {
   try {
-    const { driverId, mobileNumber, otp } = req.body;
-    if (!driverId || !mobileNumber || !otp) {
-      return res.status(400).json({ success: false, error: 'Driver ID, mobile number, and OTP are required' });
+    const { driverId } = req.params;
+    const { documents, bankDetails } = req.body;
+
+    // Validate that at least one field is provided
+    if (!documents && !bankDetails) {
+      return res.status(400).json({ success: false, error: 'At least one document or bank detail is required' });
     }
 
-    const isValidOtp = await verifyOTP(mobileNumber, otp);
-    if (!isValidOtp) {
-      return res.status(400).json({ success: false, error: 'Invalid OTP' });
+    const updates = {};
+    if (documents) {
+      const validDocumentFields = [
+        'aadhaarFrontUrl', 'aadhaarBackUrl', 'licenseFrontUrl',
+        'licenseBackUrl', 'panCardUrl',
+      ];
+      updates.documents = Object.keys(documents)
+        .filter(key => validDocumentFields.includes(key))
+        .reduce((obj, key) => ({ ...obj, [key]: documents[key] || null }), {});
+    }
+    if (bankDetails) {
+      const validBankFields = [
+        'accountHolderName', 'accountNumber', 'ifscCode', 'bankName',
+      ];
+      updates.bankDetails = Object.keys(bankDetails)
+        .filter(key => validBankFields.includes(key))
+        .reduce((obj, key) => ({ ...obj, [key]: bankDetails[key] || null }), {});
     }
 
-    const driver = await findDriverByMobile(mobileNumber);
-    if (!driver || driver.id !== driverId) {
-      return res.status(400).json({ success: false, error: 'Driver not found or mismatch' });
-    }
-    if (driver.verified) {
-      return res.status(400).json({ success: false, error: 'Driver already verified' });
-    }
-
-    const updatedDriver = await updateDriverVerification(driverId, true);
+    const updatedDriver = await updateDriverProfile(driverId, updates);
     res.json({ success: true, driver: updatedDriver });
   } catch (error) {
-    console.error('Error verifying OTP:', error);
+    console.error('Error updating driver documents:', error);
     res.status(500).json({ success: false, error: error.message });
-  }
-};
-
-const resendOTP = async (req, res) => {
-  try {
-    const { mobileNumber } = req.body;
-    if (!mobileNumber) {
-      return res.status(400).json({ success: false, error: 'Mobile number is required' });
-    }
-
-    const driver = await findDriverByMobile(mobileNumber);
-    if (!driver) {
-      return res.status(404).json({ success: false, error: 'Driver not found' });
-    }
-
-    const otpResponse = await sendOTP(mobileNumber);
-    res.json({ success: true, ...otpResponse });
-  } catch (error) {
-    console.error('Error resending OTP:', error);
-    res.status(400).json({ success: false, error: error.message });
   }
 };
 
 const loginDriver = async (req, res) => {
   try {
-    const { mobileNumber } = req.body;
-    if (!mobileNumber) {
-      return res.status(400).json({ success: false, error: 'Mobile number is required' });
+    const { idToken } = req.body;
+    if (!idToken) {
+      return res.status(400).json({ success: false, error: 'ID token is required' });
     }
 
-    const driver = await findDriverByMobile(mobileNumber);
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const driver = await findDriverByMobile(decodedToken.phone_number);
     if (!driver) {
       return res.status(404).json({ success: false, error: 'Driver not found' });
     }
     if (!driver.verified) {
-      return res.status(400).json({ success: false, error: 'Driver not verified, please verify with OTP' });
+      return res.status(400).json({ success: false, error: 'Driver not verified' });
     }
 
-    const otpResponse = await sendOTP(mobileNumber);
-    res.json({ success: true, driverId: driver.id, ...otpResponse });
+    const customToken = await admin.auth().createCustomToken(decodedToken.uid);
+    res.json({ success: true, driverId: driver.id, driver, token: customToken });
   } catch (error) {
     console.error('Error logging in driver:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -151,9 +147,9 @@ const updateLocation = async (req, res) => {
   try {
     const { driverId } = req.params;
     const { location, fcmToken, preferences } = req.body;
-    // if (!req.user || req.user.uid !== driverId) {
-    //   return res.status(403).json({ success: false, error: 'Unauthorized' });
-    // }
+    if (!req.user || req.user.uid !== driverId) {
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
     if (!location || typeof location.lat !== 'number' || typeof location.lng !== 'number') {
       return res.status(400).json({ success: false, error: 'Valid location (lat, lng) is required' });
     }
@@ -232,8 +228,7 @@ const getNearbyDrivers = async (req, res) => {
 module.exports = {
   registerDriver,
   verifyDriver,
-  verifyDriverOTP,
-  resendOTP,
+  updateDriverDocuments,
   loginDriver,
   updateProfile,
   updateLocation,

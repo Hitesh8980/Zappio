@@ -1,5 +1,6 @@
 const admin = require('firebase-admin');
-const db = admin.firestore();
+
+const { db } = require('../config/firebase'); 
 
 const create = async (data) => {
   const bookingRef = db.collection('bookings').doc();
@@ -8,10 +9,9 @@ const create = async (data) => {
 };
 
 const get = async (bookingId) => {
-  const bookingRef = db.collection('bookings').doc(bookingId);
-  const doc = await bookingRef.get();
-  if (!doc.exists) return null;
-  return { id: doc.id, ...doc.data() };
+  const bookingDoc = await db.collection('bookings').doc(bookingId).get();
+  if (!bookingDoc.exists) return null;
+  return { id: bookingDoc.id, ...bookingDoc.data() };
 };
 
 module.exports = { create, get };
