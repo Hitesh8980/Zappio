@@ -157,9 +157,9 @@ const updateProfile = async (req, res) => {
   try {
     const { driverId } = req.params;
     const updates = req.body;
-    if (!req.user || req.user.uid !== driverId) {
-      return res.status(403).json({ success: false, error: 'Unauthorized' });
-    }
+    // if (!req.user || req.user.uid !== driverId) {
+    //   return res.status(403).json({ success: false, error: 'Unauthorized' });
+    // }
     if (updates.fcmToken && typeof updates.fcmToken !== 'string') {
       return res.status(400).json({ success: false, error: 'Invalid fcmToken' });
     }
@@ -176,9 +176,9 @@ const updateLocation = async (req, res) => {
   try {
     const { driverId } = req.params;
     const { location, fcmToken, preferences } = req.body;
-    if (!req.user || req.user.uid !== driverId) {
-      return res.status(403).json({ success: false, error: 'Unauthorized' });
-    }
+    // if (!req.user || req.user.uid !== driverId) {
+    //   return res.status(403).json({ success: false, error: 'Unauthorized' });
+    // }
     if (!location || typeof location.lat !== 'number' || typeof location.lng !== 'number') {
       return res.status(400).json({ success: false, error: 'Valid location (lat, lng) is required' });
     }
@@ -198,9 +198,9 @@ const updateStatus = async (req, res) => {
   try {
     const { driverId } = req.params;
     const { status } = req.body;
-    if (!req.user || req.user.uid !== driverId) {
-      return res.status(403).json({ success: false, error: 'Unauthorized' });
-    }
+    // if (!req.user || req.user.uid !== driverId) {
+    //   return res.status(403).json({ success: false, error: 'Unauthorized' });
+    // }
     if (!['available', 'on_ride', 'offline'].includes(status)) {
       return res.status(400).json({ success: false, error: 'Invalid status' });
     }
