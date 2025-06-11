@@ -22,7 +22,8 @@
     "firebase-admin": "^13.4.0",
     "geofire-common": "^6.0.0",
     "geofirestore": "^5.2.0",
-    "morgan": "^1.10.0"
+    "morgan": "^1.10.0",
+    "multer": "^2.0.1"
   },
   "devDependencies": {
     "eslint": "^9.27.0",

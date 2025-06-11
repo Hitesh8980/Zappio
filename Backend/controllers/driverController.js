@@ -1,8 +1,15 @@
 const { createDriver, findDriverByMobile, updateDriverVerification, updateDriverProfile, updateDriverStatus, updateDriverLocation, getDriverLocation } = require('../models/driverModel');
 const admin = require('firebase-admin');
+const fs = require('fs');
+const path = require('path');
 const { GeoFirestore } = require('geofirestore');
 const { db } = require('../config/firebase');
 const geofirestore = new GeoFirestore(db);
+const uploadToFirebase = require('../utils/uploadtoFirebase');
+const { getStorage } = require('firebase-admin/storage');
+const { bucket } = require('../config/firebase');
+
+
 
 const registerDriver = async (req, res) => {
   try {
@@ -66,39 +73,61 @@ const verifyDriver = async (req, res) => {
 const updateDriverDocuments = async (req, res) => {
   try {
     const { driverId } = req.params;
-    const { documents, bankDetails } = req.body;
 
-    // Validate that at least one field is provided
-    if (!documents && !bankDetails) {
-      return res.status(400).json({ success: false, error: 'At least one document or bank detail is required' });
+    if (!req.files) {
+      return res.status(400).json({ message: 'No files uploaded' });
     }
 
-    const updates = {};
-    if (documents) {
-      const validDocumentFields = [
-        'aadhaarFrontUrl', 'aadhaarBackUrl', 'licenseFrontUrl',
-        'licenseBackUrl', 'panCardUrl',
-      ];
-      updates.documents = Object.keys(documents)
-        .filter(key => validDocumentFields.includes(key))
-        .reduce((obj, key) => ({ ...obj, [key]: documents[key] || null }), {});
-    }
-    if (bankDetails) {
-      const validBankFields = [
-        'accountHolderName', 'accountNumber', 'ifscCode', 'bankName',
-      ];
-      updates.bankDetails = Object.keys(bankDetails)
-        .filter(key => validBankFields.includes(key))
-        .reduce((obj, key) => ({ ...obj, [key]: bankDetails[key] || null }), {});
+    const fileFields = [
+      'aadhaarFront',
+      'aadhaarBack',
+      'licenseFront',
+      'licenseBack',
+      'panCard',
+      'insurance',
+      'rcFront',
+      'rcBack'
+    ];
+
+    const uploadedUrls = {};
+
+    for (const field of fileFields) {
+      const file = req.files[field]?.[0];
+      if (file) {
+        const storagePath = `drivers/${driverId}/${field}_${Date.now()}_${file.originalname}`;
+        const fileUpload = bucket.file(storagePath);
+
+        await fileUpload.save(file.buffer, {
+          metadata: { contentType: file.mimetype },
+          public: true,
+        });
+
+        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+        uploadedUrls[field] = publicUrl;
+      }
     }
 
-    const updatedDriver = await updateDriverProfile(driverId, updates);
-    res.json({ success: true, driver: updatedDriver });
+    await db.collection('drivers').doc(driverId).set({
+      documents: uploadedUrls,
+      updatedAt: new Date(),
+    }, { merge: true });
+
+    res.status(200).json({
+      message: 'Documents uploaded successfully',
+      documents: uploadedUrls,
+    });
+
   } catch (error) {
-    console.error('Error updating driver documents:', error);
-    res.status(500).json({ success: false, error: error.message });
+    console.error('❌ Error uploading documents:', error);
+    res.status(500).json({
+      message: 'Something went wrong',
+      error: error.message,
+    });
   }
 };
+
+
+
 
 const loginDriver = async (req, res) => {
   try {

@@ -20,6 +20,9 @@ const createDriver = async (driverData) => {
         licenseFrontUrl: null,
         licenseBackUrl: null,
         panCardUrl: null,
+        insuranceUrl:null,
+        rcFrontUrl: null,     
+        rcBackUrl: null 
       },
       bankDetails: {
         accountHolderName: null,
@@ -49,7 +52,7 @@ const updateDriverProfile = async (driverId, updates) => {
     const driverRef = db.collection(DRIVER_COLLECTION).doc(driverId);
     const allowedUpdates = [
       'name', 'licenseNumber', 'vehicle', 'documents', 'bankDetails',
-      'preferences', 'fcmToken',
+      'preferences', 'fcmToken','insurance','rcFront','rcBack,'
     ];
     const filteredUpdates = Object.keys(updates)
       .filter(key => allowedUpdates.includes(key))
@@ -58,7 +61,7 @@ const updateDriverProfile = async (driverId, updates) => {
           // Ensure partial document updates are merged correctly
           const validDocumentFields = [
             'aadhaarFrontUrl', 'aadhaarBackUrl', 'licenseFrontUrl',
-            'licenseBackUrl', 'panCardUrl',
+            'licenseBackUrl', 'panCardUrl','insuranceUrl','rcFrontUrl', 'rcBackUrl'
           ];
           const documentUpdates = Object.keys(updates.documents)
             .filter(docKey => validDocumentFields.includes(docKey))

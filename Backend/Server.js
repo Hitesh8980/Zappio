@@ -52,6 +52,8 @@ app.use('/api/drivers', driverRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/rides', rideRoutes); 
 app.use('/api/locations', locationRoutes); 
+app.use('/uploads', express.static('uploads'));
+
 
 // Error handler
 app.use(errorHandler);
