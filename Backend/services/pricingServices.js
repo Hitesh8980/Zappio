@@ -1,33 +1,31 @@
 const { db } = require('../config/firebase');
 const config = require('../config/env');
-const mapsService = require('../services/mapServices');
 const axios = require('axios');
 const LocationCache = require('../models/locationCache');
 
-// Peak hour logic
+// --- PEAK HOUR LOGIC ---
 const isPeakHour = (req) => {
   const mockTime = req?.headers?.mocktime;
   const peakHours = config.peakHours;
 
   const getCurrentMinutes = () => {
     if (mockTime && process.env.NODE_ENV === 'test') {
-      const [currentHour, currentMinute] = mockTime.split(':').map(Number);
-      return currentHour * 60 + currentMinute;
+      const [h, m] = mockTime.split(':').map(Number);
+      return h * 60 + m;
     }
     const now = new Date();
-    const [currentHour, currentMinute] = now.toTimeString().split(':').map(Number);
-    return currentHour * 60 + currentMinute;
+    return now.getHours() * 60 + now.getMinutes();
   };
 
   const currentMinutes = getCurrentMinutes();
 
   for (const period of Object.values(peakHours)) {
-    const [startHour, startMinute] = period.start.split(':').map(Number);
-    const [endHour, endMinute] = period.end.split(':').map(Number);
-    const startMinutes = startHour * 60 + startMinute;
-    const endMinutes = endHour * 60 + endMinute;
+    const [startH, startM] = period.start.split(':').map(Number);
+    const [endH, endM] = period.end.split(':').map(Number);
+    const startMin = startH * 60 + startM;
+    const endMin = endH * 60 + endM;
 
-    if (currentMinutes >= startMinutes && currentMinutes <= endMinutes) {
+    if (currentMinutes >= startMin && currentMinutes <= endMin) {
       return period.multiplier;
     }
   }
@@ -35,7 +33,7 @@ const isPeakHour = (req) => {
   return 1.0;
 };
 
-// Weather multiplier logic
+// --- WEATHER MULTIPLIER LOGIC ---
 const getWeatherMultiplier = async (pickupLocation, req) => {
   try {
     const mockWeather = req?.headers?.mockweather;
@@ -48,17 +46,16 @@ const getWeatherMultiplier = async (pickupLocation, req) => {
       : pickupLocation;
 
     const cacheKey = `weather_${coords.lat}_${coords.lng}`;
-    const cachedWeather = await LocationCache.getCachedLocation(cacheKey);
-    if (cachedWeather) return cachedWeather.multiplier || 1.0;
+    const cached = await LocationCache.getCachedLocation(cacheKey);
+    if (cached) return cached.multiplier || 1.0;
 
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lng}&current_weather=true`;
     const response = await axios.get(url);
+    const weatherCode = response.data?.current_weather?.weathercode?.toString();
 
-    const weatherCode = response.data.current_weather.weathercode;
     const badWeatherCodes = ['61', '63', '65', '71', '73', '75', '80', '81', '82'];
-    const isBadWeather = badWeatherCodes.includes(weatherCode.toString());
-
-    const multiplier = isBadWeather
+    const isBad = badWeatherCodes.includes(weatherCode);
+    const multiplier = isBad
       ? config.weather.badConditions.rain.multiplier || 1.2
       : 1.0;
 
@@ -70,76 +67,65 @@ const getWeatherMultiplier = async (pickupLocation, req) => {
   }
 };
 
-// 🚀 Updated Fare Calculator
+// --- FARE CALCULATION ---
 const calculateFare = async (vehicleType, distanceMeters, durationMinutes, pickupCoords, req) => {
   try {
-    const pricingDoc = await db.collection('pricing').doc(vehicleType).get();
-    const dbPricing = pricingDoc.exists ? pricingDoc.data() : {};
     const configPricing = config.fare[vehicleType] || {};
+    const pricingDoc = await db.collection('pricing').doc(vehicleType).get();
 
-    const baseFareValue = dbPricing.baseFare ?? configPricing.base ?? 0;
-    const perKmRate = dbPricing.perKmRate ?? configPricing.perKm ?? 0;
-    const perMinuteRate = dbPricing.perMinuteRate ?? configPricing.perMin ?? 0;
-    const minimumFare = dbPricing.minimumFare ?? configPricing.minimumFare ?? 0;
+    const dbPricing = pricingDoc.exists ? pricingDoc.data() : {};
+
+    const baseFare     = dbPricing.baseFare      ?? configPricing.base ?? 0;
+    const perKmRate    = dbPricing.perKmRate     ?? configPricing.perKm ?? 0;
+    const perMinRate   = dbPricing.perMinuteRate ?? configPricing.perMin ?? 0;
+    const minimumFare  = dbPricing.minimumFare   ?? configPricing.minimumFare ?? 0;
 
     const distanceKm = distanceMeters / 1000;
-    const baseFare = baseFareValue + (distanceKm * perKmRate) + (durationMinutes * perMinuteRate);
-    const peakMultiplier = isPeakHour(req, vehicleType); // Pass vehicleType
-    const weatherMultiplier = await getWeatherMultiplier(pickupCoords, req);
-    const total = Math.max(baseFare * peakMultiplier * weatherMultiplier, minimumFare);
+    const base = baseFare + (distanceKm * perKmRate) + (durationMinutes * perMinRate);
 
-    console.log('--- Calculating Fare ---', {
-      vehicleType,
-      distanceMeters,
-      distanceKm,
-      durationMinutes,
-      pricing: {
-        baseFare: baseFareValue,
-        perKmRate,
-        perMinuteRate,
-        minimumFare
-      },
-      baseFare,
-      peakMultiplier,
-      weatherMultiplier,
-      total
-    });
+    const peakMultiplier = isPeakHour(req);
+    const weatherMultiplier = await getWeatherMultiplier(pickupCoords, req);
+    const total = Math.max(base * peakMultiplier * weatherMultiplier, minimumFare);
 
     return {
       total,
       breakdown: {
-        base: baseFareValue,
+        base: baseFare,
         distance: distanceKm * perKmRate,
-        time: durationMinutes * perMinuteRate,
-        peakSurcharge: baseFare * (peakMultiplier - 1),
-        weatherSurcharge: baseFare * peakMultiplier * (weatherMultiplier - 1)
+        time: durationMinutes * perMinRate,
+        peakSurcharge: base * (peakMultiplier - 1),
+        weatherSurcharge: base * peakMultiplier * (weatherMultiplier - 1),
       }
     };
   } catch (error) {
-    console.error('Error calculating fare:', error.message);
+    console.error(`Fare calculation failed for ${vehicleType}:`, error.message);
     throw error;
   }
 };
 
-// Estimates for all vehicle types
-const getFareEstimates = async (pickupLocation, dropLocation, req) => {
-  const { distance, duration } = await mapsService.calculateDistance(pickupLocation, dropLocation);
-  const vehicleTypes = ['bike', 'auto', 'car'];
-  const estimates = {};
+// --- ESTIMATE FOR ALL VEHICLE TYPES ---
+// 🚀 NOTE: You must pass `distanceMeters`, `durationMinutes`, and `pickupCoords` from frontend!
+const getFareEstimates = async ({ pickupCoords, distanceMeters, durationMinutes }, req) => {
+  try {
+    const vehicleTypes = ['bike', 'auto', 'car'];
+    const estimates = {};
 
-  for (const type of vehicleTypes) {
-    const fare = await calculateFare(type, distance.value, duration.value / 60, pickupLocation, req);
-    estimates[type] = {
-      total: fare.total,
-      breakdown: fare.breakdown
-    };
+    for (const type of vehicleTypes) {
+      const fare = await calculateFare(type, distanceMeters, durationMinutes, pickupCoords, req);
+      estimates[type] = {
+        total: fare.total,
+        breakdown: fare.breakdown
+      };
+    }
+
+    return { estimates };
+  } catch (err) {
+    console.error('Failed to get fare estimates:', err.message);
+    throw err;
   }
-
-  return {
-    distance: distance.text,
-    duration: duration.text,
-    estimates
-  };
 };
 
-module.exports = { calculateFare, getFareEstimates };
+module.exports = {
+  calculateFare,
+  getFareEstimates
+};
