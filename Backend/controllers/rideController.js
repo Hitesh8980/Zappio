@@ -112,7 +112,7 @@ exports.createRide = async (req, res) => {
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       riderRating,
-      startOtp: Math.floor(1000 + Math.random() * 9000), // ✅ OTP to start the ride
+      startOtp: Math.floor(1000 + Math.random() * 9000), // OTP for app display
     };
 
     const rideRef = await db.collection("rides").add(rideData);
@@ -128,17 +128,33 @@ exports.createRide = async (req, res) => {
       ), // 5 minutes
     });
 
+    // Update user's ride history
+    await db.collection("users").doc(userId).update({
+      rideHistory: admin.firestore.FieldValue.arrayUnion(rideRef.id),
+    });
+
     const endTime = Date.now();
     console.log(`✅ Ride created in ${endTime - startTime} ms`);
 
     return res.status(201).json({
       success: true,
       ride: {
-        ...ride,
+        id: rideRef.id,
         distance: ride.distance.text,
         duration: ride.duration.text,
         fare: fare.total,
         fareBreakdown: fare.breakdown,
+        pickupLocation: {
+          lat: pickupCoords.lat,
+          lng: pickupCoords.lng,
+        },
+        dropLocation: {
+          lat: dropCoords.lat,
+          lng: dropCoords.lng,
+        },
+        vehicleType,
+        status: ride.status,
+        createdAt: ride.createdAt,
       },
       requestId: requestRef.id,
     });
@@ -156,7 +172,9 @@ exports.getRide = async (req, res) => {
   try {
     const ride = await Ride.get(req.params.rideId);
     if (!ride) return res.status(404).json({ error: "Ride not found" });
-    res.json(ride);
+    // Avoid exposing startOtp in API response
+    const { startOtp, ...safeRideData } = ride;
+    res.json(safeRideData);
   } catch (error) {
     console.error("Error getting ride:", error);
     res.status(500).json({ error: error.message });
@@ -223,7 +241,7 @@ exports.driverArrived = async (req, res) => {
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    // Optional: send FCM to rider
+    // Send FCM to rider with OTP
     const userRef = db.collection("users").doc(ride.userId);
     const userDoc = await userRef.get();
     const fcmToken = userDoc.data()?.fcmToken;
@@ -234,7 +252,7 @@ exports.driverArrived = async (req, res) => {
         [fcmToken],
         {
           title: "Driver Arrived",
-          body: "Your driver has arrived at the pickup location.",
+          body: `Your driver has arrived. OTP: ${ride.startOtp}`,
         },
         { rideId }
       );
@@ -317,7 +335,7 @@ exports.endRide = async (req, res) => {
     if (ride.driverId !== driverId) return res.status(403).json({ success: false, error: 'Driver not authorized' });
 
     const fare = ride.fare;
-    const gstAmount = ride.fareBreakdown?.gst ?? parseFloat((fare * 0.05).toFixed(2)); // Use fareBreakdown.gst or 5% fallback
+    const gstAmount = ride.fareBreakdown?.gst ?? parseFloat((fare * 0.05).toFixed(2));
 
     const driverRef = db.collection('drivers').doc(driverId);
 
@@ -354,3 +372,59 @@ exports.endRide = async (req, res) => {
   }
 };
 
+exports.cancelRide = async (req, res) => {
+  try {
+    const { rideId, userId } = req.body;
+
+    if (!rideId || !userId) {
+      return res.status(400).json({ success: false, error: "Missing required fields" });
+    }
+
+    const rideRef = db.collection("rides").doc(rideId);
+    const rideSnap = await rideRef.get();
+
+    if (!rideSnap.exists) {
+      return res.status(404).json({ success: false, error: "Ride not found" });
+    }
+
+    const ride = rideSnap.data();
+
+    if (ride.userId !== userId) {
+      return res.status(403).json({ success: false, error: "User not authorized" });
+    }
+
+    if (!["pending", "assigned"].includes(ride.status)) {
+      return res.status(400).json({ success: false, error: "Ride cannot be canceled in current state" });
+    }
+
+    await rideRef.update({
+      status: "canceled",
+      canceledAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Notify driver if assigned
+    if (ride.driverId) {
+      const driverRef = db.collection("drivers").doc(ride.driverId);
+      const driverDoc = await driverRef.get();
+      const fcmToken = driverDoc.data()?.fcmToken;
+
+      if (fcmToken) {
+        const { sendNotification } = require("../services/fcmServices");
+        await sendNotification(
+          [fcmToken],
+          {
+            title: "Ride Canceled",
+            body: "The ride you were assigned has been canceled by the user.",
+          },
+          { rideId }
+        );
+      }
+    }
+
+    return res.json({ success: true, message: "Ride canceled successfully" });
+  } catch (error) {
+    console.error("❌ Error canceling ride:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};

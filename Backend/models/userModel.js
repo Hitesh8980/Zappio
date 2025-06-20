@@ -13,6 +13,7 @@ const createUser = async (userData) => {
       verified: false,
       rating: userData.rating || 4.0, // Default rating
       fcmToken: userData.fcmToken || null,
+      rideHistory: [], // Initialize ride history array
     };
 
     const userRef = db.collection(USER_COLLECTION).doc(userData.userId || undefined);
@@ -73,9 +74,55 @@ const updateUserProfile = async (userId, updates) => {
   }
 };
 
+const getUserRideHistory = async (userId, status = null) => {
+  try {
+    const userRef = db.collection(USER_COLLECTION).doc(userId);
+    const userDoc = await userRef.get();
+    if (!userDoc.exists) throw new Error('User not found');
+
+    const rideHistory = userDoc.data().rideHistory || [];
+    if (!rideHistory.length) return [];
+
+    let query = db.collection('rides').where(admin.firestore.FieldPath.documentId(), 'in', rideHistory);
+    if (status) {
+      query = query.where('status', '==', status);
+    }
+
+    const snapshot = await query.get();
+    const rides = [];
+    snapshot.forEach(doc => {
+      const rideData = doc.data();
+      rides.push({
+        id: doc.id,
+        pickupLocation: {
+          lat: rideData.pickupLocation._latitude,
+          lng: rideData.pickupLocation._longitude,
+        },
+        dropLocation: {
+          lat: rideData.dropLocation._latitude,
+          lng: rideData.dropLocation._longitude,
+        },
+        vehicleType: rideData.vehicleType,
+        distance: rideData.distance.text,
+        duration: rideData.duration.text,
+        fare: rideData.fare,
+        status: rideData.status,
+        createdAt: rideData.createdAt,
+        updatedAt: rideData.updatedAt,
+        driverId: rideData.driverId || null,
+      });
+    });
+
+    return rides;
+  } catch (error) {
+    throw new Error(`Failed to fetch ride history: ${error.message}`);
+  }
+};
+
 module.exports = {
   createUser,
   findUserByMobile,
   updateUserVerification,
   updateUserProfile,
+  getUserRideHistory,
 };
