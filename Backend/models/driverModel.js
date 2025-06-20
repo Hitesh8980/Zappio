@@ -1,200 +1,126 @@
 const admin = require('firebase-admin');
+const { GeoFirestore } = require('geofirestore');
 const { db } = require('../config/firebase');
-const geofire = require('geofire-common');
-
-const DRIVER_COLLECTION = 'drivers';
+const geofirestore = new GeoFirestore(db);
 
 const createDriver = async (driverData) => {
-  try {
-    const driver = {
-      name: driverData.name,
-      mobileNumber: driverData.mobileNumber,
-      role: 'driver',
-      verified: false,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      licenseNumber: null,
-      vehicle: { type: null, registration: null },
-      documents: {
-        aadhaarFrontUrl: null,
-        aadhaarBackUrl: null,
-        licenseFrontUrl: null,
-        licenseBackUrl: null,
-        panCardUrl: null,
-        insuranceUrl:null,
-        rcFrontUrl: null,     
-        rcBackUrl: null 
-      },
-      bankDetails: {
-        accountHolderName: null,
-        accountNumber: null,
-        ifscCode: null,
-        bankName: null,
-      },
-      currentLocation: null,
-      isActive: false,
-      status: 'offline',
-      currentRideId: null,
-      preferences: { minRiderRating: 0, maxDistance: 20 },
-      fcmToken: null,
-      lastLocationUpdate: null,
-    };
+  const driverRef = db.collection('drivers').doc();
+  const driver = {
+    ...driverData,
+    isActive: true,
+    verified: false,
+    status: 'offline',
+    documentStatus: 'pending', // pending, partial, submitted
+    kycStatus: 'pending', // pending, under_review, approved, rejected
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    canAcceptRides: false, // Only true when KYC is approved
+    gstPending: 0,
+    wallet: 0,
+    gstPaidViaQR: 0
+  };
+  await driverRef.set(driver);
+  return { id: driverRef.id, ...driver };
+};
 
-    const driverRef = db.collection(DRIVER_COLLECTION).doc();
-    await driverRef.set(driver);
-    return { id: driverRef.id, ...driver };
-  } catch (error) {
-    throw new Error(`Failed to create driver: ${error.message}`);
-  }
+const findDriverByMobile = async (mobileNumber) => {
+  const snapshot = await db.collection('drivers')
+    .where('mobileNumber', '==', mobileNumber)
+    .limit(1)
+    .get();
+  if (snapshot.empty) return null;
+  const doc = snapshot.docs[0];
+  return { id: doc.id, ...doc.data() };
+};
+
+const updateDriverVerification = async (driverId, data) => {
+  const driverRef = db.collection('drivers').doc(driverId);
+  await driverRef.update({
+    verified: true,
+    firebaseUid: data.firebaseUid,
+    updatedAt: new Date()
+  });
 };
 
 const updateDriverProfile = async (driverId, updates) => {
-  try {
-    const driverRef = db.collection(DRIVER_COLLECTION).doc(driverId);
-    const allowedUpdates = [
-      'name', 'licenseNumber', 'vehicle', 'documents', 'bankDetails',
-      'preferences', 'fcmToken','insurance','rcFront','rcBack,'
-    ];
-    const filteredUpdates = Object.keys(updates)
-      .filter(key => allowedUpdates.includes(key))
-      .reduce((obj, key) => {
-        if (key === 'documents') {
-          // Ensure partial document updates are merged correctly
-          const validDocumentFields = [
-            'aadhaarFrontUrl', 'aadhaarBackUrl', 'licenseFrontUrl',
-            'licenseBackUrl', 'panCardUrl','insuranceUrl','rcFrontUrl', 'rcBackUrl'
-          ];
-          const documentUpdates = Object.keys(updates.documents)
-            .filter(docKey => validDocumentFields.includes(docKey))
-            .reduce((docObj, docKey) => ({
-              ...docObj,
-              [docKey]: updates.documents[docKey] || null,
-            }), {});
-          return { ...obj, documents: documentUpdates };
-        }
-        if (key === 'bankDetails') {
-          // Ensure partial bank details updates are merged correctly
-          const validBankFields = [
-            'accountHolderName', 'accountNumber', 'ifscCode', 'bankName',
-          ];
-          const bankUpdates = Object.keys(updates.bankDetails)
-            .filter(bankKey => validBankFields.includes(bankKey))
-            .reduce((bankObj, bankKey) => ({
-              ...bankObj,
-              [bankKey]: updates.bankDetails[bankKey] || null,
-            }), {});
-          return { ...obj, bankDetails: bankUpdates };
-        }
-        return { ...obj, [key]: updates[key] };
-      }, {});
-
-    if (Object.keys(filteredUpdates).length === 0) {
-      throw new Error('No valid fields to update');
-    }
-
-    await driverRef.update(filteredUpdates);
-    const updated = await driverRef.get();
-    if (!updated.exists) throw new Error('Driver not found');
-    return { id: updated.id, ...updated.data() };
-  } catch (error) {
-    throw new Error(`Failed to update driver profile: ${error.message}`);
-  }
-};
-
-// Other model functions (unchanged)
-const findDriverByMobile = async (mobileNumber) => {
-  try {
-    const snapshot = await db.collection(DRIVER_COLLECTION)
-      .where('mobileNumber', '==', mobileNumber)
-      .get();
-    if (snapshot.empty) return null;
-    let driver = null;
-    snapshot.forEach(doc => {
-      driver = { id: doc.id, ...doc.data() };
-    });
-    return driver;
-  } catch (error) {
-    throw new Error(`Failed to find driver: ${error.message}`);
-  }
-};
-
-const updateDriverVerification = async (driverId, verified) => {
-  try {
-    const driverRef = db.collection(DRIVER_COLLECTION).doc(driverId);
-    await driverRef.update({ verified });
-    const updatedDoc = await driverRef.get();
-    if (!updatedDoc.exists) throw new Error('Driver not found');
-    return { id: updatedDoc.id, ...updatedDoc.data() };
-  } catch (error) {
-    throw new Error(`Failed to update verification: ${error.message}`);
-  }
+  const driverRef = db.collection('drivers').doc(driverId);
+  await driverRef.update({ ...updates, updatedAt: new Date() });
+  const updatedDoc = await driverRef.get();
+  return { id: driverId, ...updatedDoc.data() };
 };
 
 const updateDriverStatus = async (driverId, status) => {
-  try {
-    const validStatuses = ['available', 'on_ride', 'offline'];
-    if (!validStatuses.includes(status)) {
-      throw new Error('Invalid driver status');
-    }
-
-    const driverRef = db.collection(DRIVER_COLLECTION).doc(driverId);
-    const updates = { 
-      status,
-      isActive: status !== 'offline',
-      lastLocationUpdate: admin.firestore.FieldValue.serverTimestamp(),
-    };
-    if (status !== 'on_ride') updates.currentRideId = null;
-
-    await driverRef.update(updates);
-    const updated = await driverRef.get();
-    if (!updated.exists) throw new Error('Driver not found');
-    return { id: updated.id, ...updated.data() };
-  } catch (error) {
-    throw new Error(`Failed to update driver status: ${error.message}`);
-  }
+  const driverRef = db.collection('drivers').doc(driverId);
+  await driverRef.update({ status, updatedAt: new Date() });
+  const updatedDoc = await driverRef.get();
+  return { id: driverId, ...updatedDoc.data() };
 };
 
-const updateDriverLocation = async (driverId, location, fcmToken = null, preferences = null) => {
-  try {
-    if (!location || !location.lat || !location.lng) {
-      throw new Error('Valid latitude and longitude are required');
-    }
+const updateDriverLocation = async (driverId, location, fcmToken, preferences) => {
+  const driverRef = geofirestore.collection('drivers').doc(driverId);
+  const geoPoint = new admin.firestore.GeoPoint(location.lat, location.lng);
+  const updates = {
+    coordinates: geoPoint,
+    currentLocation: geoPoint,
+    g: {
+      geopoint: geoPoint,
+      geohash: require('geofire-common').geohashForLocation([location.lat, location.lng])
+    },
+    locationUpdatedAt: new Date(),
+    updatedAt: new Date()
+  };
+  if (fcmToken) updates.fcmToken = fcmToken;
+  if (preferences) updates.preferences = preferences;
 
-    const driverRef = db.collection(DRIVER_COLLECTION).doc(driverId);
-    const geohash = geofire.geohashForLocation([location.lat, location.lng]);
-    const updates = {
-      currentLocation: new admin.firestore.GeoPoint(location.lat, location.lng),
-      geohash,
-      lastLocationUpdate: admin.firestore.FieldValue.serverTimestamp(),
-      isActive: true,
-    };
-    if (fcmToken) updates.fcmToken = fcmToken;
-    if (preferences) updates.preferences = preferences;
-
-    await driverRef.update(updates);
-    const updated = await driverRef.get();
-    if (!updated.exists) throw new Error('Driver not found');
-    return { id: updated.id, ...updated.data() };
-  } catch (error) {
-    throw new Error(`Failed to update driver location: ${error.message}`);
-  }
+  await driverRef.set(updates, { merge: true });
+  const updatedDoc = await driverRef.get();
+  return { id: driverId, ...updatedDoc.data() };
 };
 
-const getDriverLocation = async (driverId) => {
-  try {
-    const doc = await db.collection(DRIVER_COLLECTION).doc(driverId).get();
-    if (!doc.exists) return null;
-    
-    const data = doc.data();
-    return data.currentLocation 
-      ? { 
-          lat: data.currentLocation.latitude, 
-          lng: data.currentLocation.longitude,
-          lastUpdated: data.lastLocationUpdate?.toDate() 
-        }
-      : null;
-  } catch (error) {
-    throw new Error(`Failed to get driver location: ${error.message}`);
+const updateDriverAfterRideEnd = async (driverId, paymentMode, fare) => {
+  const driverRef = db.collection('drivers').doc(driverId);
+  const gstAmount = parseFloat((fare * 0.18).toFixed(2));
+
+  const updateData = {
+    updatedAt: new Date()
+  };
+
+  if (paymentMode === 'qr') {
+    updateData.wallet = admin.firestore.FieldValue.increment(fare - gstAmount);
+    updateData.gstPaidViaQR = admin.firestore.FieldValue.increment(gstAmount);
+  } else if (paymentMode === 'cash') {
+    updateData.gstPending = gstAmount;
+    updateData.canAcceptRides = false;
   }
+
+  await driverRef.set(updateData, { merge: true });
+};
+
+const clearGstPending = async (driverId) => {
+  const driverRef = db.collection('drivers').doc(driverId);
+  await driverRef.update({
+    gstPending: 0,
+    canAcceptRides: true,
+    updatedAt: new Date()
+  });
+};
+
+// New function to get driver's current status for conditional rendering
+const getDriverCurrentStatus = async (driverId) => {
+  const driverDoc = await db.collection('drivers').doc(driverId).get();
+  if (!driverDoc.exists) {
+    throw new Error('Driver not found');
+  }
+  
+  const data = driverDoc.data();
+  return {
+    id: driverId,
+    verified: data.verified || false,
+    documentStatus: data.documentStatus || 'pending',
+    kycStatus: data.kycStatus || 'pending',
+    canAcceptRides: data.canAcceptRides || false,
+    ...data
+  };
 };
 
 module.exports = {
@@ -204,5 +130,7 @@ module.exports = {
   updateDriverProfile,
   updateDriverStatus,
   updateDriverLocation,
-  getDriverLocation,
+  updateDriverAfterRideEnd,
+  clearGstPending,
+  getDriverCurrentStatus
 };

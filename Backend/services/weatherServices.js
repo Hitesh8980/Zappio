@@ -24,7 +24,7 @@ const axios = require('axios');
 const LocationCache = require('../models/locationCache');
 const config = require('../config/env');
 
-const axios = require('axios');
+
 
 const getWeatherMultiplier = async (pickupLocation) => {
   try {

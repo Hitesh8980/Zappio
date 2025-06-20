@@ -1,110 +1,104 @@
+/**
+ * pricingService.js
+ *
+ * Calculates ride fare including all modifiers:
+ * - Tiered distance fare
+ * - Base fare
+ * - Night surcharge
+ * - Peak hour surcharge
+ * - Weather surcharge
+ * - Long pickup fare
+ * - Wait time fare
+ * - GST
+ */
+
 const { db } = require('../config/firebase');
 const config = require('../config/env');
-const axios = require('axios');
-const LocationCache = require('../models/locationCache');
+const { isPeakHour } = require('./peakHourService');
+const { getWeatherMultiplier } = require('./weatherServices');
 
-// --- PEAK HOUR LOGIC ---
-const isPeakHour = (req) => {
-  const mockTime = req?.headers?.mocktime;
-  const peakHours = config.peakHours;
-
-  const getCurrentMinutes = () => {
-    if (mockTime && process.env.NODE_ENV === 'test') {
-      const [h, m] = mockTime.split(':').map(Number);
-      return h * 60 + m;
-    }
-    const now = new Date();
-    return now.getHours() * 60 + now.getMinutes();
-  };
-
-  const currentMinutes = getCurrentMinutes();
-
-  for (const period of Object.values(peakHours)) {
-    const [startH, startM] = period.start.split(':').map(Number);
-    const [endH, endM] = period.end.split(':').map(Number);
-    const startMin = startH * 60 + startM;
-    const endMin = endH * 60 + endM;
-
-    if (currentMinutes >= startMin && currentMinutes <= endMin) {
-      return period.multiplier;
-    }
-  }
-
-  return 1.0;
-};
-
-// --- WEATHER MULTIPLIER LOGIC ---
-const getWeatherMultiplier = async (pickupLocation, req) => {
-  try {
-    const mockWeather = req?.headers?.mockweather;
-    if (mockWeather && process.env.NODE_ENV === 'test') {
-      return config.weather.badConditions[mockWeather]?.multiplier || 1.0;
-    }
-
-    const coords = typeof pickupLocation === 'string'
-      ? await require('./geoCodingServices').geocodeAddress(pickupLocation)
-      : pickupLocation;
-
-    const cacheKey = `weather_${coords.lat}_${coords.lng}`;
-    const cached = await LocationCache.getCachedLocation(cacheKey);
-    if (cached) return cached.multiplier || 1.0;
-
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lng}&current_weather=true`;
-    const response = await axios.get(url);
-    const weatherCode = response.data?.current_weather?.weathercode?.toString();
-
-    const badWeatherCodes = ['61', '63', '65', '71', '73', '75', '80', '81', '82'];
-    const isBad = badWeatherCodes.includes(weatherCode);
-    const multiplier = isBad
-      ? config.weather.badConditions.rain.multiplier || 1.2
-      : 1.0;
-
-    await LocationCache.cacheLocation(cacheKey, { multiplier }, 10 * 60 * 1000);
-    return multiplier;
-  } catch (error) {
-    console.error('Weather API error:', error.message);
-    return 1.0;
-  }
-};
-
-// --- FARE CALCULATION ---
 const calculateFare = async (vehicleType, distanceMeters, durationMinutes, pickupCoords, req) => {
   try {
     const configPricing = config.fare[vehicleType] || {};
     const pricingDoc = await db.collection('pricing').doc(vehicleType).get();
-
     const dbPricing = pricingDoc.exists ? pricingDoc.data() : {};
 
-    const baseFare     = dbPricing.baseFare      ?? configPricing.base ?? 0;
-    const perKmRate    = dbPricing.perKmRate     ?? configPricing.perKm ?? 0;
-    const perMinRate   = dbPricing.perMinuteRate ?? configPricing.perMin ?? 0;
-    const minimumFare  = dbPricing.minimumFare   ?? configPricing.minimumFare ?? 0;
-
     const distanceKm = distanceMeters / 1000;
-    const base = baseFare + (distanceKm * perKmRate) + (durationMinutes * perMinRate);
 
+    // Tiered Distance Fare
+    let distanceFare = 0;
+    if (distanceKm <= 2) {
+      distanceFare = 0;
+    } else if (distanceKm <= 8) {
+      distanceFare = (distanceKm - 2) * 6;
+    } else {
+      distanceFare = (6 * 6) + (distanceKm - 8) * 7;
+    }
+
+    // Base Fare
+    const baseFare = dbPricing.baseFare ?? configPricing.base ?? 20;
+
+    // Wait Time Charges
+    const waitTimeThreshold = 3;
+    const waitTimeRate = 1;
+    const waitTimeMax = 20;
+    const extraWait = Math.max(durationMinutes - waitTimeThreshold, 0);
+    const waitCharge = Math.min(extraWait * waitTimeRate, waitTimeMax);
+
+    // Long Pickup Charges
+    const pickupDistanceMeters = req?.headers?.pickupdistance || 0;
+    const pickupKm = pickupDistanceMeters / 1000;
+    let longPickupFare = 0;
+    if (pickupKm > 2) {
+      longPickupFare = Math.min(pickupKm - 2, 6) * 3;
+    }
+
+    // Night Surcharge
+    const now = new Date();
+    const hours = now.getHours();
+    const isNight = hours >= 22 || hours < 6;
+    const nightSurchargeRate = isNight ? 0.20 : 0;
+    const nightSurchargeAmount = (baseFare + distanceFare + waitCharge + longPickupFare) * nightSurchargeRate;
+
+    // Peak & Weather Multipliers
     const peakMultiplier = isPeakHour(req);
     const weatherMultiplier = await getWeatherMultiplier(pickupCoords, req);
-    const total = Math.max(base * peakMultiplier * weatherMultiplier, minimumFare);
+
+    const subtotal = baseFare + distanceFare + waitCharge + longPickupFare + nightSurchargeAmount;
+    const peakAdjusted = subtotal * peakMultiplier;
+    const weatherAdjusted = peakAdjusted * weatherMultiplier;
+
+    // GST Calculation
+    const gstRate = 0.05;
+    const gstAmount = weatherAdjusted * gstRate;
+    const totalWithGST = weatherAdjusted + gstAmount;
 
     return {
-      total,
+      total: parseFloat(totalWithGST.toFixed(2)),
+      driverPayout: parseFloat(weatherAdjusted.toFixed(2)),
+      gst: parseFloat(gstAmount.toFixed(2)),
       breakdown: {
-        base: baseFare,
-        distance: distanceKm * perKmRate,
-        time: durationMinutes * perMinRate,
-        peakSurcharge: base * (peakMultiplier - 1),
-        weatherSurcharge: base * peakMultiplier * (weatherMultiplier - 1),
+        baseFare: parseFloat(baseFare.toFixed(2)),
+        distanceFare: parseFloat(distanceFare.toFixed(2)),
+        waitCharge: parseFloat(waitCharge.toFixed(2)),
+        longPickupFare: parseFloat(longPickupFare.toFixed(2)),
+        nightSurchargeAmount: parseFloat(nightSurchargeAmount.toFixed(2)),
+        peakSurcharge: parseFloat((peakAdjusted - subtotal).toFixed(2)),
+        weatherSurcharge: parseFloat((weatherAdjusted - peakAdjusted).toFixed(2)),
+        subtotal: parseFloat(subtotal.toFixed(2)),
+        peakAdjusted: parseFloat(peakAdjusted.toFixed(2)),
+        weatherAdjusted: parseFloat(weatherAdjusted.toFixed(2)),
+        gst: parseFloat(gstAmount.toFixed(2)),
+        total: parseFloat(totalWithGST.toFixed(2))
       }
     };
+
   } catch (error) {
     console.error(`Fare calculation failed for ${vehicleType}:`, error.message);
     throw error;
   }
 };
 
-// --- ESTIMATE FOR ALL VEHICLE TYPES ---
-// 🚀 NOTE: You must pass `distanceMeters`, `durationMinutes`, and `pickupCoords` from frontend!
 const getFareEstimates = async ({ pickupCoords, distanceMeters, durationMinutes }, req) => {
   try {
     const vehicleTypes = ['bike', 'auto', 'car'];
@@ -114,6 +108,8 @@ const getFareEstimates = async ({ pickupCoords, distanceMeters, durationMinutes 
       const fare = await calculateFare(type, distanceMeters, durationMinutes, pickupCoords, req);
       estimates[type] = {
         total: fare.total,
+        driverPayout: fare.driverPayout,
+        gst: fare.gst,
         breakdown: fare.breakdown
       };
     }

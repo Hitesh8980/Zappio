@@ -5,6 +5,8 @@ const {
   registerDriver,
   verifyDriver,
   updateDriverDocuments,
+  updateKycStatus,
+  getDriverStatus,
   loginDriver,
   updateProfile,
   updateLocation,
@@ -32,6 +34,8 @@ const documentFields = [
 router.post('/register', registerDriver); // Register driver (name, mobileNumber)
 router.post('/verify', verifyDriver); // Verify driver using Firebase Auth idToken
 router.put('/:driverId/documents', upload.fields(documentFields), updateDriverDocuments); // Upload/update driver documents
+router.put('/:driverId/kyc-status', updateKycStatus); // Update KYC status (admin only)
+router.get('/:driverId/status', getDriverStatus); // Get driver status for conditional rendering
 router.post('/login', loginDriver); // Login flow (Firebase Auth)
 router.put('/:driverId/update-profile', updateProfile); // Update profile details
 router.post('/:driverId/location', updateLocation); // Update driver location

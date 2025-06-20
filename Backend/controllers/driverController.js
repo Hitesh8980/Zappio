@@ -9,8 +9,6 @@ const uploadToFirebase = require('../utils/uploadtoFirebase');
 const { getStorage } = require('firebase-admin/storage');
 const { bucket } = require('../config/firebase');
 
-
-
 const registerDriver = async (req, res) => {
   try {
     const { name, mobileNumber } = req.body;
@@ -107,14 +105,39 @@ const updateDriverDocuments = async (req, res) => {
       }
     }
 
+    // Get current driver document to check existing documents
+    const currentDriverDoc = await db.collection('drivers').doc(driverId).get();
+    const currentData = currentDriverDoc.data();
+    const existingDocuments = currentData?.documents || {};
+    
+    // Merge with existing documents
+    const allDocuments = { ...existingDocuments, ...uploadedUrls };
+    
+    // Check if all required documents are uploaded
+    const requiredDocuments = ['aadhaarFront', 'aadhaarBack', 'licenseFront', 'licenseBack', 'panCard', 'insurance', 'rcFront', 'rcBack'];
+    const uploadedDocumentKeys = Object.keys(allDocuments);
+    const allDocumentsUploaded = requiredDocuments.every(doc => uploadedDocumentKeys.includes(doc));
+    
+    // Determine document status
+    let documentStatus = 'pending'; // Default status
+    if (uploadedDocumentKeys.length > 0 && !allDocumentsUploaded) {
+      documentStatus = 'partial';
+    } else if (allDocumentsUploaded) {
+      documentStatus = 'submitted';
+    }
+
+    // Update driver document with new status
     await db.collection('drivers').doc(driverId).set({
-      documents: uploadedUrls,
+      documents: allDocuments,
+      documentStatus: documentStatus,
       updatedAt: new Date(),
     }, { merge: true });
 
     res.status(200).json({
       message: 'Documents uploaded successfully',
       documents: uploadedUrls,
+      documentStatus: documentStatus,
+      allDocumentsSubmitted: allDocumentsUploaded
     });
 
   } catch (error) {
@@ -126,8 +149,76 @@ const updateDriverDocuments = async (req, res) => {
   }
 };
 
+// New function to update KYC status (for admin approval)
+const updateKycStatus = async (req, res) => {
+  try {
+    const { driverId } = req.params;
+    const { kycStatus, rejectionReason } = req.body;
 
+    if (!['approved', 'rejected', 'under_review'].includes(kycStatus)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid KYC status. Must be approved, rejected, or under_review' 
+      });
+    }
 
+    const updateData = {
+      kycStatus: kycStatus,
+      updatedAt: new Date(),
+    };
+
+    if (kycStatus === 'rejected' && rejectionReason) {
+      updateData.rejectionReason = rejectionReason;
+    }
+
+    if (kycStatus === 'approved') {
+      updateData.canAcceptRides = true;
+      updateData.rejectionReason = null; // Clear any previous rejection reason
+    }
+
+    await db.collection('drivers').doc(driverId).update(updateData);
+
+    const updatedDriver = await db.collection('drivers').doc(driverId).get();
+    
+    res.json({ 
+      success: true, 
+      driver: { id: updatedDriver.id, ...updatedDriver.data() },
+      message: `KYC status updated to ${kycStatus}`
+    });
+  } catch (error) {
+    console.error('Error updating KYC status:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Get driver status for conditional rendering
+const getDriverStatus = async (req, res) => {
+  try {
+    const { driverId } = req.params;
+    
+    const driverDoc = await db.collection('drivers').doc(driverId).get();
+    
+    if (!driverDoc.exists) {
+      return res.status(404).json({ success: false, error: 'Driver not found' });
+    }
+
+    const driverData = driverDoc.data();
+    
+    const status = {
+      verified: driverData.verified || false,
+      documentStatus: driverData.documentStatus || 'pending',
+      kycStatus: driverData.kycStatus || 'pending',
+      canAcceptRides: driverData.canAcceptRides || false,
+      documentsSubmitted: driverData.documentStatus === 'submitted',
+      kycApproved: driverData.kycStatus === 'approved'
+    };
+
+    res.json({ success: true, status });
+  } catch (error) {
+    console.error('Error getting driver status:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
 
 const loginDriver = async (req, res) => {
   try {
@@ -258,6 +349,8 @@ module.exports = {
   registerDriver,
   verifyDriver,
   updateDriverDocuments,
+  updateKycStatus,
+  getDriverStatus,
   loginDriver,
   updateProfile,
   updateLocation,
