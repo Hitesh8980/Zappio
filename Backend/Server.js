@@ -8,6 +8,7 @@ const driverRoutes = require('./routes/driverRoutes');
 const bookingRoutes = require('./routes/bookingRoutes');
 const rideRoutes = require('./routes/rideRoutes'); 
 const locationRoutes = require('./routes/locationRoutes'); 
+const adminRoutes = require('./routes/adminRoutes');
 
 const rateLimit = require('./middleware/rateLimit');
 const logger = require('./utils/logger');
@@ -52,6 +53,7 @@ app.use('/api/drivers', driverRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/rides', rideRoutes); 
 app.use('/api/locations', locationRoutes); 
+app.use('/api', adminRoutes);
 app.use('/uploads', express.static('uploads'));
 
 
