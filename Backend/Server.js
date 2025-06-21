@@ -15,6 +15,8 @@ const logger = require('./utils/logger');
 const errorHandler = require('./utils/errorHandler');
 
 const app = express();
+const cors = require('cors');
+app.use(cors());
 
 // Global middlewares
 app.use(express.json());
@@ -59,6 +61,10 @@ app.use('/uploads', express.static('uploads'));
 
 // Error handler
 app.use(errorHandler);
+
+
+
+
 
 // Start server
 const PORT = config.port || 5000;
