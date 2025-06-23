@@ -3,7 +3,8 @@ const {
   findUserByUID,
   updateUserVerification
 } = require('../models/userModel');
-const { auth } = require('../config/firebase');
+const { auth, db  } = require('../config/firebase');
+const admin = require('firebase-admin');
 
 const registerUser = async (req, res) => {
   try {

@@ -308,3 +308,38 @@ exports.getRideStats = async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
+// ================= Delete Driver Document =================
+exports.deleteDriverDocument = async (req, res) => {
+  try {
+    const { driverId, docKey } = req.params;
+    const driverRef = db.collection('drivers').doc(driverId);
+    const driverDoc = await driverRef.get();
+
+    if (!driverDoc.exists) {
+      return res.status(404).json({ success: false, error: 'Driver not found' });
+    }
+
+    const driver = driverDoc.data();
+    const imageUrl = driver.documents?.[docKey];
+
+    if (imageUrl) {
+      // Remove from Firebase Storage
+      const bucket = admin.storage().bucket();
+      const filePath = decodeURIComponent(new URL(imageUrl).pathname.replace(/^\/+/, ''));
+      await bucket.file(filePath).delete().catch(() => {
+        console.warn('Failed to delete file from bucket (may not exist)');
+      });
+    }
+
+    // Remove the document reference from Firestore
+    await driverRef.update({
+      [`documents.${docKey}`]: admin.firestore.FieldValue.delete()
+    });
+
+    res.json({ success: true, message: `Deleted ${docKey} successfully` });
+  } catch (error) {
+    console.error('Error deleting driver document:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
