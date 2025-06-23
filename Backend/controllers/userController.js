@@ -7,25 +7,43 @@ const { auth } = require('../config/firebase');
 
 const registerUser = async (req, res) => {
   try {
-    const { uid, name, mobileNumber } = req.body;
-    if (!uid || !name || !mobileNumber) {
-      return res.status(400).json({ message: 'UID, name, and mobile number are required' });
+    const { name, mobileNumber } = req.body;
+
+    if (!name || !mobileNumber) {
+      return res.status(400).json({ message: 'Name and mobile number are required' });
     }
 
-    let user = await findUserByUID(uid);
-    if (user && user.verified) {
-      return res.status(400).json({ message: 'User already registered and verified' });
+    // Check if user already exists based on mobile number
+    const userSnapshot = await db.collection('users')
+      .where('mobileNumber', '==', mobileNumber)
+      .limit(1)
+      .get();
+
+    if (!userSnapshot.empty) {
+      const existingUser = userSnapshot.docs[0].data();
+      if (existingUser.verified) {
+        return res.status(400).json({ message: 'User already registered and verified' });
+      }
     }
 
-    if (!user) {
-      user = await createUser({ uid, name, mobileNumber });
-    }
+    // Create a new user entry
+    const newUserRef = await db.collection('users').add({
+      name,
+      mobileNumber,
+      verified: false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
 
-    res.status(200).json({ message: 'User created, initiate phone auth', userId: user.id });
+    return res.status(200).json({
+      message: 'User created, initiate phone auth',
+      userId: newUserRef.id,
+    });
+
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 const verifyUser = async (req, res) => {
   try {

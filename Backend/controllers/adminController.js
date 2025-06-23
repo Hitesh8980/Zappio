@@ -57,7 +57,7 @@ exports.searchUsers = async (req, res) => {
       const data = doc.data();
       return {
         id: doc.id,
-        name: data.fullName || 'N/A',
+        name: data.name || 'N/A',
         mobileNumber: data.mobileNumber || 'N/A',
         email: data.email || 'N/A',
         createdAt: data.createdAt?.toDate()?.toISOString() || new Date().toISOString(),
@@ -111,7 +111,7 @@ exports.searchDrivers = async (req, res) => {
   try {
     const { term = '', status } = req.query;
 
-    const snapshot = await db.collection('drivers').limit(50).get(); // broader fetch
+    const snapshot = await db.collection('drivers').limit(50).get(); 
 
     const drivers = snapshot.docs
       .map(doc => ({ id: doc.id, ...doc.data() }))
@@ -134,7 +134,7 @@ exports.searchDrivers = async (req, res) => {
       })
       .map(driver => ({
         driverId: driver.id,
-        name: driver.fullName || 'N/A',
+        name: driver.name || 'N/A',
         mobileNumber: driver.mobileNumber || 'N/A',
         kycStatus: driver.kycStatus || 'pending',
         createdAt: driver.createdAt?.toDate().toISOString() || new Date().toISOString(),
