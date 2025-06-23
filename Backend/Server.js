@@ -21,7 +21,7 @@ app.use(cors());
 // Global middlewares
 app.use(express.json());
 app.use(logger.logRequest);
-app.use(rateLimit.ipRateLimit);
+// app.use(rateLimit.ipRateLimit);
 
 // Routes
 app.get('/', (req, res) => {
@@ -50,12 +50,12 @@ app.get('/test-firebase', async (req, res) => {
 });
 
 // API routes
-app.use('/api/users', rateLimit.otpRateLimit, userRoutes);
+app.use('/api/users',  userRoutes);
 app.use('/api/drivers', driverRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/rides', rideRoutes); 
 app.use('/api/locations', locationRoutes); 
-app.use('/api', adminRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/uploads', express.static('uploads'));
 
 

@@ -20,7 +20,7 @@ exports.createRide = async (req, res) => {
       durationMinutes,
     } = req.body;
 
-    const userId = req.entity?.uid || "test-user-id";
+    const userId = req.entity?.uid ;
 
     if (!pickupLocation || !dropLocation || !vehicleType) {
       return res.status(400).json({
@@ -171,13 +171,22 @@ exports.createRide = async (req, res) => {
 exports.getRide = async (req, res) => {
   try {
     const ride = await Ride.get(req.params.rideId);
-    if (!ride) return res.status(404).json({ error: "Ride not found" });
-    // Avoid exposing startOtp in API response
+    if (!ride) return res.status(404).json({ 
+      success: false,  // Add success flag
+      error: ""  // Remove the message
+    });
+    
     const { startOtp, ...safeRideData } = ride;
-    res.json(safeRideData);
+    res.json({
+      success: true,  // Add success flag
+      ride: safeRideData
+    });
   } catch (error) {
     console.error("Error getting ride:", error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
   }
 };
 

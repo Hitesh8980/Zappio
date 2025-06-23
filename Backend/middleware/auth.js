@@ -5,7 +5,9 @@ const verifyToken = async (req, res, next) => {
   console.log('🔐 verifyToken middleware called for:', req.originalUrl);
 
   try {
-    const token = req.headers.authorization?.split('Bearer ')[1];
+    const authHeader = req.headers.authorization || '';
+const token = authHeader.startsWith('Bearer ') ? authHeader.split('Bearer ')[1] : null;
+
     if (!token) {
       console.warn('⚠️ No token provided');
       return res.status(401).json({ message: 'No token provided' });

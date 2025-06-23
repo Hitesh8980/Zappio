@@ -8,16 +8,15 @@ const createUser = async (userData) => {
     const user = {
       name: userData.name,
       mobileNumber: userData.mobileNumber,
-      role: 'rider', // Enforce "rider" role
+      role: 'rider',
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       verified: false,
-      rating: userData.rating || 4.0, // Default rating
+      rating: userData.rating || 4.0,
       fcmToken: userData.fcmToken || null,
-      rideHistory: [], // Initialize ride history array
+      rideHistory: [],
     };
 
-    const userRef = db.collection(USER_COLLECTION).doc(userData.mobileNumber);
-
+    const userRef = db.collection(USER_COLLECTION).doc(userData.uid);
     await userRef.set(user);
     return { id: userRef.id, ...user };
   } catch (error) {
@@ -25,26 +24,19 @@ const createUser = async (userData) => {
   }
 };
 
-const findUserByMobile = async (mobileNumber) => {
+const findUserByUID = async (uid) => {
   try {
-    const snapshot = await db.collection(USER_COLLECTION)
-      .where('mobileNumber', '==', mobileNumber)
-      .get();
-    
-    if (snapshot.empty) return null;
-    let user = null;
-    snapshot.forEach(doc => {
-      user = { id: doc.id, ...doc.data() };
-    });
-    return user;
+    const userDoc = await db.collection(USER_COLLECTION).doc(uid).get();
+    if (!userDoc.exists) return null;
+    return { id: userDoc.id, ...userDoc.data() };
   } catch (error) {
-    throw new Error(`Failed to find user: ${error.message}`);
+    throw new Error(`Failed to find user by UID: ${error.message}`);
   }
 };
 
-const updateUserVerification = async (userId, verified) => {
+const updateUserVerification = async (uid, verified) => {
   try {
-    const userRef = db.collection(USER_COLLECTION).doc(userId);
+    const userRef = db.collection(USER_COLLECTION).doc(uid);
     await userRef.update({ verified });
     const updatedDoc = await userRef.get();
     if (!updatedDoc.exists) throw new Error('User not found');
@@ -54,14 +46,14 @@ const updateUserVerification = async (userId, verified) => {
   }
 };
 
-const updateUserProfile = async (userId, updates) => {
+const updateUserProfile = async (uid, updates) => {
   try {
-    const userRef = db.collection(USER_COLLECTION).doc(userId);
+    const userRef = db.collection(USER_COLLECTION).doc(uid);
     const allowedUpdates = ['name', 'mobileNumber', 'fcmToken', 'rating'];
     const filteredUpdates = Object.keys(updates)
       .filter(key => allowedUpdates.includes(key))
       .reduce((obj, key) => ({ ...obj, [key]: updates[key] }), {});
-    
+
     if (Object.keys(filteredUpdates).length === 0) {
       throw new Error('No valid fields to update');
     }
@@ -75,9 +67,9 @@ const updateUserProfile = async (userId, updates) => {
   }
 };
 
-const getUserRideHistory = async (userId, status = null) => {
+const getUserRideHistory = async (uid, status = null) => {
   try {
-    const userRef = db.collection(USER_COLLECTION).doc(userId);
+    const userRef = db.collection(USER_COLLECTION).doc(uid);
     const userDoc = await userRef.get();
     if (!userDoc.exists) throw new Error('User not found');
 
@@ -122,7 +114,7 @@ const getUserRideHistory = async (userId, status = null) => {
 
 module.exports = {
   createUser,
-  findUserByMobile,
+  findUserByUID,
   updateUserVerification,
   updateUserProfile,
   getUserRideHistory,
