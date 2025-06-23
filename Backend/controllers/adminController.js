@@ -309,6 +309,9 @@ exports.getRideStats = async (req, res) => {
   }
 };
 // ================= Delete Driver Document =================
+// ✅ Updated deleteDriverDocument controller with logs
+// ✅ Updated deleteDriverDocument controller to support multiple URL formats
+// ✅ Fully fixed deleteDriverDocument controller with correct path extraction
 exports.deleteDriverDocument = async (req, res) => {
   try {
     const { driverId, docKey } = req.params;
@@ -323,23 +326,51 @@ exports.deleteDriverDocument = async (req, res) => {
     const imageUrl = driver.documents?.[docKey];
 
     if (imageUrl) {
-      // Remove from Firebase Storage
-      const bucket = admin.storage().bucket();
-      const filePath = decodeURIComponent(new URL(imageUrl).pathname.replace(/^\/+/, ''));
-      await bucket.file(filePath).delete().catch(() => {
-        console.warn('Failed to delete file from bucket (may not exist)');
-      });
+      try {
+        const url = new URL(imageUrl);
+        console.log('🔍 Original URL:', imageUrl);
+
+        const bucket = admin.storage().bucket();
+        console.log('🪣 Bucket name:', bucket.name);
+
+        let filePath;
+
+        if (url.hostname.includes('firebasestorage.googleapis.com')) {
+          const fullPathParam = url.pathname.split('/o/')[1];
+          filePath = decodeURIComponent(fullPathParam?.split('?')[0] || '');
+        } else {
+          const rawPath = url.pathname.slice(1); // Remove leading slash
+          const prefix = bucket.name + '/';
+          filePath = rawPath.startsWith(prefix) ? rawPath.slice(prefix.length) : rawPath;
+        }
+
+        if (!filePath) throw new Error('Could not extract path from URL');
+        console.log('✅ Final file path for deletion:', filePath);
+
+        await bucket.file(filePath).delete();
+        console.log('✅ File deleted from Firebase Storage');
+
+      } catch (err) {
+        console.error('❌ Error extracting or deleting file:', err.message);
+      }
+    } else {
+      console.warn('⚠️ No image URL found for', docKey);
     }
 
-    // Remove the document reference from Firestore
     await driverRef.update({
-      [`documents.${docKey}`]: admin.firestore.FieldValue.delete()
+      [`documents.${docKey}`]: admin.firestore.FieldValue.delete(),
     });
 
     res.json({ success: true, message: `Deleted ${docKey} successfully` });
+
   } catch (error) {
-    console.error('Error deleting driver document:', error);
+    console.error('❌ Error deleting driver document:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
+
+
+
+
+
 

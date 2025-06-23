@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
-const { deleteDriverDocument } = require('../controllers/adminController');
+const { deleteDriverDocument } = require('../controllers/adminController'); 
 
 // Change all admin routes to have /admin prefix
 router.get('/dashboard/stats', adminController.getDashboardStats);
