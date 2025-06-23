@@ -16,7 +16,8 @@ const createUser = async (userData) => {
       rideHistory: [], // Initialize ride history array
     };
 
-    const userRef = db.collection(USER_COLLECTION).doc(userData.userId || undefined);
+    const userRef = db.collection(USER_COLLECTION).doc(userData.mobileNumber);
+
     await userRef.set(user);
     return { id: userRef.id, ...user };
   } catch (error) {
