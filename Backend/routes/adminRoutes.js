@@ -11,4 +11,6 @@ router.get('/drivers/users', adminController.searchDrivers);
 router.get('/rides/search', adminController.searchRides);
 router.get('/rides/stats', adminController.getRideStats);  // This will now be /api/admin/rides/stats
 router.delete('/drivers/:driverId/documents/:docKey', deleteDriverDocument);
+router.put('/drivers/:driverId/kyc-status', adminController.updateDriverKycStatus);
+
 module.exports = router;

@@ -369,6 +369,36 @@ exports.deleteDriverDocument = async (req, res) => {
   }
 };
 
+exports.updateDriverKycStatus = async (req, res) => {
+  try {
+    const { driverId } = req.params;
+    const { kycStatus, rejectionReason } = req.body;
+
+    if (!driverId || !kycStatus) {
+      return res.status(400).json({ success: false, error: 'Missing driverId or kycStatus' });
+    }
+
+    const driverRef = db.collection('drivers').doc(driverId);
+    const driverDoc = await driverRef.get();
+
+    if (!driverDoc.exists) {
+      return res.status(404).json({ success: false, error: 'Driver not found' });
+    }
+
+    const updateData = {
+      kycStatus,
+      ...(kycStatus === 'rejected' && rejectionReason ? { rejectionReason } : {}),
+    };
+
+    await driverRef.update(updateData);
+
+    res.json({ success: true, message: 'KYC status updated successfully' });
+  } catch (error) {
+    console.error('Error updating KYC status:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 
 
 
