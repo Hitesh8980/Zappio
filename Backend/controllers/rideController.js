@@ -97,6 +97,8 @@ exports.createRide = async (req, res) => {
         dropCoords.lat,
         dropCoords.lng
       ),
+      pickupLocationName: typeof pickupLocation === 'string' ? pickupLocation : '',
+      dropLocationName: typeof dropLocation === 'string' ? dropLocation : '',
       vehicleType,
       distance: {
         value: finalDistanceMeters,
@@ -152,6 +154,8 @@ exports.createRide = async (req, res) => {
           lat: dropCoords.lat,
           lng: dropCoords.lng,
         },
+        pickupLocationName: rideData.pickupLocationName,
+        dropLocationName: rideData.dropLocationName,
         vehicleType,
         status: ride.status,
         createdAt: ride.createdAt,
@@ -167,6 +171,7 @@ exports.createRide = async (req, res) => {
     });
   }
 };
+
 
 exports.getRide = async (req, res) => {
   try {
