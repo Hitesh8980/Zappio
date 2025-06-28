@@ -1,7 +1,7 @@
 const { auth, db } = require('../config/firebase');
 
 const verifyToken = async (req, res, next) => {
-  // console.log('🔐 verifyToken middleware called for:', req.originalUrl);
+  console.log('🔐 verifyToken middleware called for:', req.originalUrl);
   try {
     const authHeader = req.headers.authorization || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.split('Bearer ')[1] : null;

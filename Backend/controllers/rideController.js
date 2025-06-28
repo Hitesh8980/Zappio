@@ -6,160 +6,125 @@ const admin = require("firebase-admin");
 const { db } = require("../config/firebase");
 const geolib = require("geolib");
 
+
+
+const generateOtp = () => Math.floor(1000 + Math.random() * 9000);
 exports.createRide = async (req, res) => {
   const startTime = Date.now();
-
   try {
     const {
       pickupLocation,
       dropLocation,
       vehicleType,
+      pickupLocationName, // Added to extract from request body
+      dropLocationName,   // Added to extract from request body
       pickupCoords: inputPickupCoords,
       dropCoords: inputDropCoords,
       distanceMeters,
       durationMinutes,
+      confirmImmediately = false
     } = req.body;
 
-    const userId = req.entity?.uid ;
-
+    const userId = req.entity?.uid;
     if (!pickupLocation || !dropLocation || !vehicleType) {
-      return res.status(400).json({
-        errors: [
-          {
-            type: "field",
-            msg: "Pickup location is required",
-            path: "pickupLocation",
-          },
-          {
-            type: "field",
-            msg: "Drop location is required",
-            path: "dropLocation",
-          },
-          { type: "field", msg: "Invalid vehicle type", path: "vehicleType" },
-        ],
-      });
+      return res.status(400).json({ error: "Missing fields" });
     }
 
-    const pickupCoords =
-      inputPickupCoords ||
-      (typeof pickupLocation === "string"
-        ? await geocodeAddress(pickupLocation)
-        : pickupLocation);
-    const dropCoords =
-      inputDropCoords ||
-      (typeof dropLocation === "string"
-        ? await geocodeAddress(dropLocation)
-        : dropLocation);
+    // 🔁 Resolve coordinates
+    const pickupCoords = inputPickupCoords || (typeof pickupLocation === "string" ? await geocodeAddress(pickupLocation) : pickupLocation);
+    const dropCoords = inputDropCoords || (typeof dropLocation === "string" ? await geocodeAddress(dropLocation) : dropLocation);
 
-    if (
-      !pickupCoords?.lat ||
-      !pickupCoords?.lng ||
-      !dropCoords?.lat ||
-      !dropCoords?.lng
-    ) {
+    if (!pickupCoords?.lat || !pickupCoords?.lng || !dropCoords?.lat || !dropCoords?.lng) {
       throw new Error("Invalid coordinates");
     }
 
-    let route;
-    let finalDistanceMeters = distanceMeters;
-    let finalDurationMinutes = durationMinutes;
+    // 🗺️ Route & distance calculation
     let routePolyline = "";
+    let finalDistance = distanceMeters;
+    let finalDuration = durationMinutes;
 
-    if (!distanceMeters || !durationMinutes) {
-      console.log("📡 Fetching route from backend...");
-      route = await getRoute(pickupCoords, dropCoords);
-      finalDistanceMeters = route.distance.value;
-      finalDurationMinutes = route.duration.value / 60;
+    if (!finalDistance || !finalDuration) {
+      const route = await getRoute(pickupCoords, dropCoords);
+      finalDistance = route.distance.value;
+      finalDuration = route.duration.value / 60;
       routePolyline = route.overview_polyline?.points || "";
-    } else {
-      console.log("🚀 Using distance & duration from frontend payload...");
-      routePolyline = ""; // optional if frontend doesn't send
     }
 
-    const fare = await calculateFare(
-      vehicleType,
-      finalDistanceMeters,
-      finalDurationMinutes,
-      pickupCoords,
-      req
-    );
+    // 💸 Calculate fare
+    const fare = await calculateFare(vehicleType, finalDistance, finalDuration, pickupCoords, req);
+    const userDoc = await db.collection("users").doc(userId).get();
+    const riderRating = userDoc.data()?.rating || 4.0;
 
-    const user = (await db.collection("users").doc(userId).get()).data();
-    const riderRating = user?.rating || 4.0;
-
+    // 📝 Prepare ride document
+    const otp = generateOtp();
+    const rideRef = db.collection("rides").doc();
     const rideData = {
       userId,
-      pickupLocation: new admin.firestore.GeoPoint(
-        pickupCoords.lat,
-        pickupCoords.lng
-      ),
-      dropLocation: new admin.firestore.GeoPoint(
-        dropCoords.lat,
-        dropCoords.lng
-      ),
-      pickupLocationName: typeof pickupLocation === 'string' ? pickupLocation : '',
-      dropLocationName: typeof dropLocation === 'string' ? dropLocation : '',
+      pickupLocation: new admin.firestore.GeoPoint(pickupCoords.lat, pickupCoords.lng),
+      dropLocation: new admin.firestore.GeoPoint(dropCoords.lat, dropCoords.lng),
+      pickupLocationName: pickupLocationName || (typeof pickupLocation === "string" ? pickupLocation : ''),
+      dropLocationName: dropLocationName || (typeof dropLocation === "string" ? dropLocation : ''),
       vehicleType,
-      distance: {
-        value: finalDistanceMeters,
-        text: `${(finalDistanceMeters / 1000).toFixed(1)} km`,
-      },
-      duration: {
-        value: finalDurationMinutes * 60,
-        text: `${Math.round(finalDurationMinutes)} mins`,
-      },
+      distance: { value: finalDistance, text: `${(finalDistance / 1000).toFixed(1)} km` },
+      duration: { value: finalDuration * 60, text: `${Math.round(finalDuration)} mins` },
       fare: fare.total,
+      fareBreakdown: fare.breakdown,
       route: routePolyline,
       status: "pending",
+      riderRating,
+      startOtp: otp,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      riderRating,
-      startOtp: Math.floor(1000 + Math.random() * 9000), // OTP for app display
     };
 
-    const rideRef = await db.collection("rides").add(rideData);
-    const ride = { id: rideRef.id, ...rideData };
+    // 🔁 Create ride and ride request atomically
+    const batch = db.batch();
+    batch.set(rideRef, rideData);
 
-    const requestRef = await db.collection("rideRequests").add({
+    const requestRef = db.collection("rideRequests").doc();
+    batch.set(requestRef, {
       rideId: rideRef.id,
-      searchRadius: 5,
       status: "pending",
+      searchRadius: 5,
       vehicleType,
-      expiresAt: admin.firestore.Timestamp.fromDate(
-        new Date(Date.now() + 5 * 60 * 1000)
-      ), // 5 minutes
+      expiresAt: admin.firestore.Timestamp.fromDate(new Date(Date.now() + 5 * 60 * 1000)),
+      createdAt: admin.firestore.FieldValue.serverTimestamp(), // Fixed typo
     });
 
-    // Update user's ride history
-    await db.collection("users").doc(userId).update({
-      rideHistory: admin.firestore.FieldValue.arrayUnion(rideRef.id),
+    batch.update(db.collection("users").doc(userId), {
+      rideHistory: admin.firestore.FieldValue.arrayUnion(rideRef.id)
     });
+
+    await batch.commit();
+
+    const responseData = {
+      id: rideRef.id,
+      distance: rideData.distance.text,
+      duration: rideData.duration.text,
+      fare: fare.total,
+      fareBreakdown: fare.breakdown,
+      pickupLocation: pickupCoords,
+      dropLocation: dropCoords,
+      pickupLocationName: rideData.pickupLocationName,
+      dropLocationName: rideData.dropLocationName,
+      vehicleType,
+      status: rideData.status,
+      createdAt: rideData.createdAt,
+    };
+
+    // 🚀 Auto-notify drivers if confirmed immediately
+    if (confirmImmediately) {
+      const { notifyDrivers } = require("./notificationController");
+      await notifyDrivers({ body: { requestId: requestRef.id } }, res);
+      return;
+    }
 
     const endTime = Date.now();
     console.log(`✅ Ride created in ${endTime - startTime} ms`);
 
     return res.status(201).json({
       success: true,
-      ride: {
-        id: rideRef.id,
-        distance: ride.distance.text,
-        duration: ride.duration.text,
-        fare: fare.total,
-        fareBreakdown: fare.breakdown,
-        pickupLocation: {
-          lat: pickupCoords.lat,
-          lng: pickupCoords.lng,
-        },
-        dropLocation: {
-          lat: dropCoords.lat,
-          lng: dropCoords.lng,
-        },
-        pickupLocationName: rideData.pickupLocationName,
-        dropLocationName: rideData.dropLocationName,
-        vehicleType,
-        status: ride.status,
-        createdAt: ride.createdAt,
-      },
+      ride: responseData,
       requestId: requestRef.id,
     });
   } catch (error) {
@@ -288,9 +253,7 @@ exports.startRide = async (req, res) => {
     const { rideId, enteredOtp, driverId } = req.body;
 
     if (!rideId || !enteredOtp || !driverId) {
-      return res
-        .status(400)
-        .json({ success: false, error: "Missing required fields" });
+      return res.status(400).json({ success: false, error: "Missing required fields" });
     }
 
     const rideRef = db.collection("rides").doc(rideId);
@@ -303,18 +266,14 @@ exports.startRide = async (req, res) => {
     const ride = rideSnap.data();
 
     if (ride.status !== "arrived") {
-      return res
-        .status(400)
-        .json({ success: false, error: "Ride not in arrived state" });
+      return res.status(400).json({ success: false, error: "Ride not in 'arrived' state" });
     }
 
     if (ride.driverId !== driverId) {
-      return res
-        .status(403)
-        .json({ success: false, error: "Driver not authorized" });
+      return res.status(403).json({ success: false, error: "Driver not authorized for this ride" });
     }
 
-    if (ride.startOtp !== enteredOtp) {
+    if (ride.startOtp?.toString() !== enteredOtp?.toString()) {
       return res.status(403).json({ success: false, error: "Incorrect OTP" });
     }
 
@@ -335,40 +294,47 @@ exports.endRide = async (req, res) => {
   try {
     const { rideId, driverId, paymentMode } = req.body;
 
-    if (!rideId || !driverId || !['cash', 'qr'].includes(paymentMode)) {
-      return res.status(400).json({ success: false, error: 'Missing or invalid fields' });
+    if (!rideId || !driverId || !["cash", "qr"].includes(paymentMode)) {
+      return res.status(400).json({ success: false, error: "Missing or invalid fields" });
     }
 
-    const rideRef = db.collection('rides').doc(rideId);
+    const rideRef = db.collection("rides").doc(rideId);
     const rideSnap = await rideRef.get();
 
-    if (!rideSnap.exists) return res.status(404).json({ success: false, error: 'Ride not found' });
+    if (!rideSnap.exists) {
+      return res.status(404).json({ success: false, error: "Ride not found" });
+    }
 
     const ride = rideSnap.data();
-    if (ride.status !== 'in_progress') return res.status(400).json({ success: false, error: 'Ride not active' });
-    if (ride.driverId !== driverId) return res.status(403).json({ success: false, error: 'Driver not authorized' });
 
-    const fare = ride.fare;
-    const gstAmount = ride.fareBreakdown?.gst ?? parseFloat((fare * 0.05).toFixed(2));
+    if (ride.status !== "in_progress") {
+      return res.status(400).json({ success: false, error: "Ride is not active" });
+    }
 
-    const driverRef = db.collection('drivers').doc(driverId);
+    if (ride.driverId !== driverId) {
+      return res.status(403).json({ success: false, error: "Driver not authorized for this ride" });
+    }
+
+    const fare = ride.fare || 0;
+    const gstAmount = ride.fareBreakdown?.gst || parseFloat((fare * 0.05).toFixed(2));
+    const driverRef = db.collection("drivers").doc(driverId);
 
     await db.runTransaction(async (transaction) => {
       transaction.update(rideRef, {
-        status: 'completed',
+        status: "completed",
         endedAt: admin.firestore.FieldValue.serverTimestamp(),
         paymentMode,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       });
 
-      if (paymentMode === 'qr') {
+      if (paymentMode === "qr") {
         transaction.update(driverRef, {
           wallet: admin.firestore.FieldValue.increment(fare - gstAmount),
-          gstPaidViaQR: admin.firestore.FieldValue.increment(gstAmount)
+          gstPaidViaQR: admin.firestore.FieldValue.increment(gstAmount),
         });
-      } else if (paymentMode === 'cash') {
+      } else if (paymentMode === "cash") {
         transaction.update(driverRef, {
-          gstPending: gstAmount,
+          gstPending: admin.firestore.FieldValue.increment(gstAmount),
           canAcceptRides: false
         });
       }
@@ -377,14 +343,16 @@ exports.endRide = async (req, res) => {
     return res.json({
       success: true,
       message: `Ride ended. Payment received via ${paymentMode}.`,
-      gst: gstAmount
+      gst: gstAmount,
+      creditedToWallet: paymentMode === "qr" ? fare - gstAmount : 0,
+      gstPending: paymentMode === "cash" ? gstAmount : 0,
     });
-
   } catch (error) {
-    console.error('❌ Error ending ride:', error);
+    console.error("❌ Error ending ride:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
+
 
 exports.cancelRide = async (req, res) => {
   try {

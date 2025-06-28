@@ -126,12 +126,17 @@ const notifyDrivers = async (req, res) => {
 };
 
 function isDriverEligible(driver, ride) {
+  const minRiderRating = driver.preferences?.minRiderRating || 0;
+  const maxDistance = driver.preferences?.maxDistance || driver.preferences?.maxRadius || 20;
+  const riderRating = ride.riderRating || 4.0;
+  const distanceToDrop = geofire.distanceBetween(
+    [driver.currentLocation.latitude, driver.currentLocation.longitude],
+    [ride.dropLocation.latitude, ride.dropLocation.longitude]
+  );
+  console.log(`Driver ${driver.name}: minRiderRating=${minRiderRating}, riderRating=${riderRating}, distanceToDrop=${distanceToDrop}, maxDistance=${maxDistance}`);
   const meetsPreferences = !driver.preferences || (
-    (driver.preferences.minRiderRating || 0) <= (ride.riderRating || 4.0) &&
-    geofire.distanceBetween(
-      [driver.currentLocation.latitude, driver.currentLocation.longitude],
-      [ride.dropLocation.latitude, ride.dropLocation.longitude]
-    ) <= (driver.preferences.maxDistance || 20)
+    minRiderRating <= riderRating &&
+    distanceToDrop <= maxDistance
   );
   return meetsPreferences;
 }
